@@ -1,6 +1,6 @@
-# Multipage Dashboard
+# Multipage navigation with the original Gradio UI
 
-Goradio 0.4.0 introduces a responsive SB Admin–inspired navigation shell around the bundled Gradio 6.30.0 frontend. Each page has independent components and callbacks. This API is inspired by Gradio's routing concepts but is **not** a complete replacement for Gradio Blocks.
+Goradio provides a responsive, collapsible sidebar around the **unchanged Gradio 6.30.0 frontend**. SB Admin is only an inspiration for the navigation layout; page content retains the standard Gradio theme, spacing, controls, and CSS. Each page has independent components and callbacks. This API is inspired by Gradio's routing concepts but is **not** a complete replacement for Gradio Blocks.
 
 ## Python
 
@@ -64,6 +64,30 @@ Complete native Go example: **examples/dashboard-go/main.go**.
 | Handler | Independent callback implemented in Go |
 
 The current menu link receives aria-current="page". At narrow viewport widths the sidebar becomes an off-canvas panel with an accessible toggle, backdrop and Escape-to-close behavior.
+
+## Original Gradio theme and color preferences
+
+The sidebar inherits Gradio's built-in CSS variables for backgrounds, typography, borders, and active colors. It **does not** apply a separate admin-dashboard color scheme to the page or override `.gradio-container`. Gradio's native light/dark mode is respected automatically.
+
+At the bottom of the sidebar, use **Primary color** and **Secondary color** to customize the same Gradio theme variables that color native Buttons, sliders, links, and other components. Use the reset button (↺) to return to Gradio's original default palette.
+
+The browser preserves your two chosen colors and collapsed-sidebar preference across windows and reloads using `localStorage` on the current origin; preferences are private to that browser and are **not** stored in the app's SQLite database or shared between devices. If a browser prohibits localStorage, colors remain usable during the current page visit.
+
+The sidebar's collapse arrow is a centered SVG icon. On mobile, the sidebar becomes a slide-in navigation menu, while the Gradio application retains its own responsive layout.
+
+To test the sidebar and theme controls using the repository's Go example, run:
+
+```bash
+go run ./examples/dashboard-go
+```
+
+Then, with Chrome installed, run the browser smoke test:
+
+```bash
+node scripts/dev/gradio_theme_browser_smoke.mjs http://127.0.0.1:7933
+```
+
+The browser test checks original Gradio light/dark backgrounds, a centered collapse icon, both theme colors, reset, state persistence across pages, and mobile navigation.
 
 ## Login and per-page persistence
 

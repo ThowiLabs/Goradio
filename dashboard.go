@@ -333,37 +333,45 @@ func dashboardShell(info dashboardPageContext) (string, string, string) {
 		if icon == "" {
 			icon = "file"
 		}
-		links.WriteString(fmt.Sprintf(`<a class="%s" href="%s" data-icon="%s"%s><span class="gd-nav-icon" aria-hidden="true"></span><span>%s</span></a>`,
-			klass, html.EscapeString(p.Path), html.EscapeString(icon), aria, html.EscapeString(p.Title)))
+		links.WriteString(fmt.Sprintf(`<a class="%s" href="%s" title="%s" data-icon="%s"%s><span class="gd-nav-icon" aria-hidden="true"></span><span class="gd-link-label">%s</span></a>`,
+			klass, html.EscapeString(p.Path), html.EscapeString(p.Title), html.EscapeString(icon), aria, html.EscapeString(p.Title)))
 	}
 	title := info.title
 	if title == "" {
 		title = "Goradio"
-	}
-	currentTitle := title
-	for _, p := range info.pages {
-		if p.Path == info.current {
-			currentTitle = p.Title
-			break
-		}
 	}
 	// JSON para JS sin interpolación sin escape.
 	pageSlug, _ := json.Marshal(info.current)
 	extraHead := fmt.Sprintf(`<link rel="stylesheet" href="/goradio-dashboard.css">
  <script>window.__goradioPage=%s;(function(){const original=window.fetch.bind(window);window.fetch=function(input,init){const uri=typeof input==="string"?input:input instanceof URL?input.href:input.url;const target=new URL(uri,location.href);if(target.origin===location.origin&&(target.pathname.startsWith("/gradio_api/")||target.pathname.startsWith("/api/")||target.pathname==="/config")){const options=init?{...init}:{};const headers=new Headers(options.headers||(input instanceof Request?input.headers:undefined));headers.set("X-Goradio-Page",window.__goradioPage);options.headers=headers;return original(input,options)}return original(input,init)}})();</script>
  <script defer src="/goradio-dashboard.js"></script>`, string(pageSlug))
-	opener := fmt.Sprintf(`<div class="gd-layout"><aside id="gd-sidebar" class="gd-sidebar" aria-label="Navegación">
-  <a href="%s" class="gd-brand"><span class="gd-brand-mark">G</span><span>%s<span class="gd-brand-sub">WORKSPACE</span></span></a>
-  <div class="gd-side-scroll"><div class="gd-nav-caption">NAVEGACIÓN</div>%s</div>
-  <div class="gd-sidebar-footer">GORADIO · 0.4</div></aside>
-  <div id="gd-backdrop" class="gd-backdrop"></div>
-  <div class="gd-main"><header class="gd-topbar">
-    <button id="gd-menu-toggle" class="gd-menu-toggle" type="button" aria-label="Abrir menú" aria-controls="gd-sidebar" aria-expanded="false"><span>☰</span></button>
-    <div class="gd-top-title"><span>%s</span><span class="gd-crumb"> / %s</span></div>
-    <span class="gd-header-spacer"></span><span class="gd-status"><i></i> Online</span>
-  </header><main class="gd-content"><div class="gd-page-header"><p>WORKSPACE / %s</p><h1>%s</h1></div>`,
-		html.EscapeString(info.pages[0].Path), html.EscapeString(title), links.String(),
-		html.EscapeString(title), html.EscapeString(currentTitle),
-		html.EscapeString(currentTitle), html.EscapeString(currentTitle))
-	return extraHead, opener, `</main></div></div>`
+	opener := fmt.Sprintf(`<div class="gd-layout">
+  <aside id="gd-sidebar" class="gd-sidebar" aria-label="Ventanas de Goradio">
+    <div class="gd-brand-row">
+      <a href="%s" class="gd-brand" title="Goradio"><span class="gd-brand-mark">G</span><span class="gd-brand-label">%s<span class="gd-brand-sub">GORADIO</span></span></a>
+      <button id="gd-sidebar-collapse" class="gd-sidebar-collapse" type="button" title="Contraer barra lateral" aria-label="Contraer barra lateral" aria-controls="gd-sidebar" aria-expanded="true"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"></path></svg></button>
+    </div>
+    <nav class="gd-side-scroll" aria-label="Páginas"><div class="gd-nav-caption">VENTANAS</div>%s</nav>
+    <div class="gd-sidebar-footer">
+      <div class="gd-theme-controls" role="group" aria-label="Personalización de color Gradio">
+        <label class="gd-theme-label" for="gd-theme-color">Color del tema</label>
+        <div class="gd-theme-actions">
+          <input id="gd-theme-color" class="gd-theme-color" type="color" value="#f97316" title="Personalizar color principal de Gradio" aria-label="Color principal de Gradio">
+        </div>
+      </div>
+      <div class="gd-theme-controls" role="group" aria-label="Personalización del color secundario">
+        <label class="gd-theme-label" for="gd-theme-secondary">Color secundario</label>
+        <div class="gd-theme-actions">
+          <input id="gd-theme-secondary" class="gd-theme-color" type="color" value="#3b82f6" title="Personalizar color secundario de Gradio" aria-label="Color secundario de Gradio">
+          <button id="gd-theme-reset" class="gd-theme-reset" type="button" title="Restaurar los colores originales de Gradio" aria-label="Restaurar colores originales">↺</button>
+        </div>
+      </div>
+      <span class="gd-sidebar-footer-label">Tema original de Gradio</span>
+    </div>
+  </aside>
+  <div id="gd-backdrop" class="gd-backdrop" aria-hidden="true"></div>
+  <main class="gd-main">
+    <div class="gd-mobile-toolbar"><button id="gd-menu-toggle" class="gd-menu-toggle" type="button" aria-label="Abrir menú" aria-controls="gd-sidebar" aria-expanded="false"><span aria-hidden="true">☰</span></button><span class="gd-mobile-label">%s</span></div>`,
+		html.EscapeString(info.pages[0].Path), html.EscapeString(title), links.String(), html.EscapeString(title))
+	return extraHead, opener, `</main></div>`
 }

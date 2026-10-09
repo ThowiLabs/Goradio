@@ -293,3 +293,64 @@ func TestDashboardPublicAuthProbeDoesNotReturn404(t *testing.T) {
 		t.Fatalf("anonymous /auth/me should return 200: %d %s", r.Code, r.Body.String())
 	}
 }
+
+func TestDashboardPreservesOriginalGradioFrontend(t *testing.T) {
+	d := demoDashboard(t)
+	h := d.Routes()
+	for _, path := range []string{"/", "/imagenes"} {
+		res := dashboardRequest(t, h, "GET", path, nil, nil, "", "", "")
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s status %d", path, res.Code)
+		}
+		page := res.Body.String()
+		for _, marker := range []string{
+			"<gradio-app", "/assets/index-D88pgWqG.js", "/assets/index-DuOipanW.css",
+			`aria-label="Ventanas de Goradio"`, `id="gd-sidebar-collapse"`,
+			`id="gd-menu-toggle"`, `id="gd-theme-color"`, `id="gd-theme-secondary"`,
+			`id="gd-theme-reset"`, `<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"></path></svg>`,
+			"goradio-dashboard.css", `aria-current="page"`,
+		} {
+			if !strings.Contains(page, marker) {
+				t.Errorf("Missing Gradio/sidebar marker %q on %s", marker, path)
+			}
+		}
+		for _, forbidden := range []string{"gd-page-header", "gd-topbar", "gd-content", "gd-status"} {
+			if strings.Contains(page, forbidden) {
+				t.Errorf("Unexpected administrative element %s on %s", forbidden, path)
+			}
+		}
+	}
+	css := dashboardRequest(t, h, "GET", "/goradio-dashboard.css", nil, nil, "", "", "")
+	if css.Code != 200 {
+		t.Fatalf("stylesheet HTTP %d", css.Code)
+	}
+	style := css.Body.String()
+	if strings.Contains(style, ".gradio-container") || strings.Contains(style, "gradio-app .") {
+		t.Fatal("Sidebar CSS must not override Gradio's theme or inner container")
+	}
+	for _, token := range []string{
+		"var(--background-fill-primary", "var(--body-text-color", "var(--color-accent)",
+		"var(--border-color-primary)", "var(--font,", ".gd-sidebar-collapse svg",
+		"display:grid;place-items:center",
+	} {
+		if !strings.Contains(style, token) {
+			t.Errorf("Sidebar must inherit original Gradio token or centered SVG: %s", token)
+		}
+	}
+	if strings.Contains(style, "background: #18253b") {
+		t.Fatal("Sidebar must not have a hard-coded color scheme")
+	}
+	js := dashboardRequest(t, h, "GET", "/goradio-dashboard.js", nil, nil, "", "", "")
+	if js.Code != 200 {
+		t.Fatalf("Sidebar JS status %d", js.Code)
+	}
+	for _, marker := range []string{
+		"goradio.sidebar.collapsed.v1", "goradio.theme.", "primary",
+		"secondary", "localStorage.setItem", "localStorage.removeItem",
+		"applyPalette", "restorePalette",
+	} {
+		if !strings.Contains(js.Body.String(), marker) {
+			t.Errorf("Missing theme persistence and restoration marker %q", marker)
+		}
+	}
+}
