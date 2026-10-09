@@ -13,7 +13,7 @@ The project embeds the compiled **Gradio 6.30.0 frontend** and implements a comp
 - **Go-first runtime** — HTTP server, routing, request validation, and execution backed by Go.
 - **Python integration** — Define interfaces with familiar `Interface(fn, inputs, outputs)` semantics.
 - **Gradio frontend** — Reuses bundled Gradio 6.30.0 UI assets rather than imitating the interface.
-- **Multipage navigation** — Collapsible sidebar inspired by SB Admin, with the original Gradio interface and theme unchanged; independent routes and callbacks, shared login and optional per-page saved state. The sidebar follows light/dark mode and offers persistent primary and secondary theme color choices.
+- **Multipage navigation** — Collapsible sidebar inspired by SB Admin, with the original Gradio interface and theme unchanged; independent routes and callbacks, shared login and optional per-page saved state. The sidebar inherits Gradio's theme and light/dark mode; the developer configures its primary and secondary colors in Go or Python, without exposing an editor to visitors.
 - **Interactive components** — Text, numbers, sliders, checkboxes, dropdowns, JSON, images, audio, video, and files.
 - **Native public sharing** — Generate `*.gradio.live` links using a Go implementation of the tunnel protocol; no separate `frpc` executable is required.
 - **Authentication and persistence** — Optional SQLite accounts, sessions, and saved form inputs and outputs.

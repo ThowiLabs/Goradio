@@ -8,7 +8,7 @@ Fecha: 2026-10-09. Implementación en `gradio_native.go`, `tunnels.go`, `interna
 
 El cliente nativo es el único modo de conexión de Gradio: no existe proveedor alternativo que descargue ni ejecute `frpc`.
 
-**Supervisión:** cada 20 segundos se comprueba que el enlace público siga respondiendo, no solo que la conexión local FRP esté abierta. Tras tres comprobaciones fallidas, se invalida el enlace y se solicita automáticamente otro. Durante la reconexión se puede consultar `/api/tunnels` para obtener la nueva dirección.
+**Supervisión:** cada 20 segundos se comprueba que el enlace público siga respondiendo, no solo que la conexión local FRP esté abierta. Tras cinco comprobaciones fallidas, se invalida el enlace y se solicita automáticamente otro. Durante la reconexión se puede consultar `/api/tunnels` para obtener la nueva dirección.
 
 El cliente Go implementa las funciones esenciales del protocolo compatible con el fork FRP del servicio de Hugging Face: TLS con certificado del servidor de la API oficial, prefijo TLS FRP, yamux, login, hash de nombre de proxy, canal de control cifrado, proxy HTTP, conexión de trabajo, cifrado, compresión Snappy, ping/pong, interrupción segura y reintentos con backoff. El evento remoto `Kill` no ejecuta nunca `os.Exit`.
 
@@ -48,6 +48,20 @@ demo.launch(share=["gradio"])
 Para varios proveedores en paralelo: `share=["gradio","cloudflare","pinggy"]`. El alias `gradio_native` es equivalente a `gradio`.
 
 CLI Go: `--share gradio` sin ningún cliente externo.
+
+### Supervisión y cambios de URL
+
+El cliente verifica el endpoint público antes de anunciar `online`. Si la verificación inicial falla, **cancela ese túnel e intenta obtener otro**, evitando sesiones abiertas pero inservibles. Posteriormente consulta la salud pública cada 20 segundos y tolera hasta cuatro errores consecutivos para no cambiar de dirección ante fallos transitorios. Después de cinco fallos seguidos renegocia un túnel.
+
+La URL `gradio.live` **puede cambiar** al recuperar la conexión: el cliente no controla el hostname del proveedor y no puede mantener activa la URL anterior. Consulta `GET /api/tunnels` para obtener la dirección vigente con `status: online`. La instancia Go local puede continuar funcionando aunque el enlace externo haya expirado. Mantén vivo el proceso Go y el contexto de la llamada a `Serve` o `TunnelManager.Start`.
+
+Para medir estabilidad:
+
+```powershell
+python scripts/dev/monitor_gradio_native.py --port 7860 --seconds 300 --interval 15 --output native-test.json
+```
+
+Este monitor registra la salud local, pública, cambios de URL y predicciones. Las pruebas de corta duración no prueban una disponibilidad continua de 72 horas. Para una URL estable de producción, utiliza alojamiento y dominio propios.
 
 ## Dependencias y derechos
 

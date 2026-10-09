@@ -306,15 +306,14 @@ func TestDashboardPreservesOriginalGradioFrontend(t *testing.T) {
 		for _, marker := range []string{
 			"<gradio-app", "/assets/index-D88pgWqG.js", "/assets/index-DuOipanW.css",
 			`aria-label="Ventanas de Goradio"`, `id="gd-sidebar-collapse"`,
-			`id="gd-menu-toggle"`, `id="gd-theme-color"`, `id="gd-theme-secondary"`,
-			`id="gd-theme-reset"`, `<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"></path></svg>`,
+			`id="gd-menu-toggle"`, `<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"></path></svg>`,
 			"goradio-dashboard.css", `aria-current="page"`,
 		} {
 			if !strings.Contains(page, marker) {
 				t.Errorf("Missing Gradio/sidebar marker %q on %s", marker, path)
 			}
 		}
-		for _, forbidden := range []string{"gd-page-header", "gd-topbar", "gd-content", "gd-status"} {
+		for _, forbidden := range []string{`id="gd-theme-color"`, `id="gd-theme-secondary"`, `id="gd-theme-reset"`, "gd-page-header", "gd-topbar", "gd-content", "gd-status"} {
 			if strings.Contains(page, forbidden) {
 				t.Errorf("Unexpected administrative element %s on %s", forbidden, path)
 			}
@@ -345,9 +344,7 @@ func TestDashboardPreservesOriginalGradioFrontend(t *testing.T) {
 		t.Fatalf("Sidebar JS status %d", js.Code)
 	}
 	for _, marker := range []string{
-		"goradio.sidebar.collapsed.v1", "goradio.theme.", "primary",
-		"secondary", "localStorage.setItem", "localStorage.removeItem",
-		"applyPalette", "restorePalette",
+		"goradio.sidebar.collapsed.v1", "localStorage.setItem",
 	} {
 		if !strings.Contains(js.Body.String(), marker) {
 			t.Errorf("Missing theme persistence and restoration marker %q", marker)

@@ -379,7 +379,7 @@ func (m *TunnelManager) verifyGradioNative(ctx context.Context, provider, link s
 
 // Watch public health, not just the encrypted FRP control channel. Some remote
 // relay instances return an HTML 404 while the TCP tunnel remains connected.
-// 3 consecutive failures trigger a fresh public URL. Cancelled attempts cannot
+// 5 consecutive failures trigger a fresh public URL. Cancelled attempts cannot
 // publish stale addresses.
 func (m *TunnelManager) watchGradioNative(ctx context.Context, provider, link string, cancel context.CancelFunc, interval time.Duration) {
 	if interval <= 0 {
@@ -401,10 +401,10 @@ func (m *TunnelManager) watchGradioNative(ctx context.Context, provider, link st
 				continue
 			}
 			failures++
-			nativeDebug("Public Gradio health failed %d/3", failures)
-			if failures >= 3 {
+			nativeDebug("Public Gradio health failed %d/5", failures)
+			if failures >= 5 {
 				if ctx.Err() == nil {
-					log.Printf("Gradio nativo: enlace público inactivo, solicitando nuevo túnel")
+					log.Printf("Gradio nativo: URL pública %s inactiva; el servidor solicitará otra URL (la anterior dejará de funcionar)", link)
 					m.set(TunnelInfo{Provider: provider, Status: "reconnecting", Error: "Enlace público no disponible"})
 					cancel()
 				}
@@ -430,6 +430,15 @@ func (m *TunnelManager) runGradioNative(ctx context.Context, provider string, po
 					go func() {
 						if m.verifyGradioNative(attemptCtx, provider, link) {
 							m.watchGradioNative(attemptCtx, provider, link, cancel, 20*time.Second)
+							return
+						}
+						// A valid FRP login does not guarantee the public HTTP
+						// endpoint is routable. Without cancellation here,
+						// the session could stay alive forever but never be
+						// marked online or monitored.
+						if attemptCtx.Err() == nil {
+							log.Printf("Gradio nativo: URL %s no pasó la verificación inicial; reconectando", link)
+							cancel()
 						}
 					}()
 				})

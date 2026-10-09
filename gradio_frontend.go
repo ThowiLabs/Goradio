@@ -373,6 +373,9 @@ func (a *App) gradioTheme(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
+	if a.Config.Theme != nil {
+		theme = append(theme, []byte(themeOverrides(a.Config.Theme))...)
+	}
 	if _, err := w.Write(theme); err != nil {
 		log.Printf("Error enviando CSS de Gradio: %v", err)
 	}

@@ -20,64 +20,6 @@
   const storageKey="goradio.sidebar.collapsed.v1";
   if(!layout||!btn||!side)return;
   try{layout.classList.toggle("gd-collapsed",localStorage.getItem(storageKey)==="true")}catch{}
-  // Gradio defines the light and dark palettes in /theme.css. Changing these
-  // exact CSS variables keeps Buttons, sliders, links, and our sidebar in sync.
-  const primaryPicker=document.querySelector("#gd-theme-color");
-  const secondaryPicker=document.querySelector("#gd-theme-secondary");
-  const resetColors=document.querySelector("#gd-theme-reset");
-  const nativeDefaults={
-   primary:getComputedStyle(document.documentElement).getPropertyValue("--primary-500").trim()||"#f97316",
-   secondary:getComputedStyle(document.documentElement).getPropertyValue("--secondary-500").trim()||"#3b82f6"
-  };
-  const shades=[50,100,200,300,400,500,600,700,800,900,950];
-  const hexValid=value=>typeof value==="string"&&/^#[\da-f]{6}$/i.test(value);
-  const channels=value=>[1,3,5].map(i=>parseInt(value.slice(i,i+2),16));
-  const blend=(left,right,rightWeight)=>{
-   const a=channels(left),b=channels(right);
-   return "#"+a.map((v,i)=>Math.round(v*(1-rightWeight)+b[i]*rightWeight).toString(16).padStart(2,"0")).join("");
-  };
-  const palette=value=>({
-   50:blend(value,"#ffffff",.94),
-   100:blend(value,"#ffffff",.87),
-   200:blend(value,"#ffffff",.72),
-   300:blend(value,"#ffffff",.50),
-   400:blend(value,"#ffffff",.22),
-   500:value,
-   600:blend(value,"#000000",.13),
-   700:blend(value,"#000000",.28),
-   800:blend(value,"#000000",.43),
-   900:blend(value,"#000000",.58),
-   950:blend(value,"#000000",.70)
-  });
-  const applyPalette=(kind,value)=>{
-   if(!hexValid(value))return;
-   const colors=palette(value);
-   for(const shade of shades)document.body.style.setProperty("--"+kind+"-"+shade,colors[shade]);
-  };
-  const restorePalette=kind=>{
-   for(const shade of shades)document.body.style.removeProperty("--"+kind+"-"+shade);
-  };
-  for(const [kind,picker] of [["primary",primaryPicker],["secondary",secondaryPicker]]){
-   if(!picker)continue;
-   const key="goradio.theme."+kind+".v1";
-   let selected;
-   try{selected=localStorage.getItem(key)}catch{}
-   if(hexValid(selected))applyPalette(kind,selected);
-   picker.value=hexValid(selected)?selected:nativeDefaults[kind];
-   const update=()=>{
-    applyPalette(kind,picker.value);
-    try{localStorage.setItem(key,picker.value)}catch{}
-   };
-   picker.addEventListener("input",update);
-   picker.addEventListener("change",update);
-  }
-  resetColors?.addEventListener("click",()=>{
-   for(const [kind,picker] of [["primary",primaryPicker],["secondary",secondaryPicker]]){
-    restorePalette(kind);
-    try{localStorage.removeItem("goradio.theme."+kind+".v1")}catch{}
-    if(picker)picker.value=nativeDefaults[kind];
-   }
-  });
   const setOpen=(value)=>{
    layout.classList.toggle("gd-menu-open",value);
    btn.setAttribute("aria-expanded",String(value));

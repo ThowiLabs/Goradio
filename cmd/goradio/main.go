@@ -95,7 +95,7 @@ func main() {
 				pageHandler = goradio.PythonHandler(strings.TrimSuffix(*callback, "/")+"/"+slug, os.Getenv("GORADIO_CALLBACK_TOKEN"))
 			}
 			pageCfg := goradio.Config{
-				Title: page.Title, Description: page.Description, Inputs: page.Inputs, Outputs: page.Outputs,
+				Title: page.Title, Description: page.Description, Inputs: page.Inputs, Outputs: page.Outputs, Theme: cfg.Theme,
 			}
 			if err := dashboard.Add(goradio.Window{
 				Path: page.Path, Title: page.Title, Icon: page.Icon, Group: page.Group,

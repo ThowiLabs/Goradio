@@ -22,13 +22,30 @@ from urllib.request import Request, urlopen
 
 __all__ = [
     "Interface", "Dashboard", "Component", "Textbox", "Number", "Slider", "Checkbox",
-    "Dropdown", "Image", "Audio", "Video", "File", "JSON", "media",
+    "Dropdown", "Image", "Audio", "Video", "File", "JSON", "Theme", "media",
 ]
 
 _MEDIA_ROOT: Path | None = None
 _TYPES = {"textbox", "number", "slider", "checkbox", "dropdown",
           "image", "audio", "video", "file", "json"}
 
+
+@dataclass
+class Theme:
+    """Colores CSS del tema original de Gradio (sin editor en la interfaz).
+
+    Uso: gr.Theme(primary_color="#f97316", secondary_color="#3b82f6")
+    """
+
+    primary_color: str = ""
+    secondary_color: str = ""
+
+    def __post_init__(self):
+        import re
+        for name in ("primary_color", "secondary_color"):
+            value = getattr(self, name)
+            if value and not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+                raise ValueError(f"theme.{name} debe tener formato #RRGGBB")
 
 @dataclass
 class Component:
@@ -118,7 +135,7 @@ def _normalize_auth(auth):
 
 class Interface:
     def __init__(self, fn: Callable, inputs: Any, outputs: Any,
-                 title: str = "Goradio", description: str = "") -> None:
+                 title: str = "Goradio", description: str = "", theme: Theme | None = None) -> None:
         if not callable(fn):
             raise TypeError("fn debe ser invocable")
         self.fn = fn
@@ -128,6 +145,9 @@ class Interface:
             raise ValueError("Se requiere una salida")
         self.title = title
         self.description = description
+        if theme is not None and not isinstance(theme, Theme):
+            raise TypeError("theme debe ser gr.Theme o None")
+        self.theme = theme
         self._process: subprocess.Popen | None = None
         self._server: ThreadingHTTPServer | None = None
         self._temporary: tempfile.TemporaryDirectory | None = None
@@ -229,6 +249,7 @@ class Interface:
             self._server = CallbackServer(("127.0.0.1", 0), Callback)
             threading.Thread(target=self._server.serve_forever, daemon=True).start()
             cfg = {"title": self.title, "description": self.description,
+                   "theme": asdict(self.theme) if self.theme is not None else None,
                    "inputs": [c.config() for c in self.inputs],
                    "outputs": [c.config() for c in self.outputs]}
             if self._dashboard_pages is not None:
@@ -330,9 +351,10 @@ class Dashboard(Interface):
         dash.launch(share=["gradio", "cloudflare"])
     """
 
-    def __init__(self, title: str = "Goradio", description: str = "") -> None:
+    def __init__(self, title: str = "Goradio", description: str = "",
+                 theme: Theme | None = None) -> None:
         super().__init__(lambda: "", [], Textbox(label="Salida"),
-                         title=title, description=description)
+                         title=title, description=description, theme=theme)
         self._dashboard_pages = {}
 
     def route(self, title: str, path: str, app: Interface | None = None,

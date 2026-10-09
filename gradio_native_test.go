@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -470,4 +471,32 @@ func TestGradioPublicHealthBasicAuth(t *testing.T) {
 			t.Errorf("realm %q => %v expected %v", tc.realm, result, tc.valid)
 		}
 	}
+}
+
+func TestGradioNativeWatchToleratesTemporaryFailures(t *testing.T) {
+	var requests int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt64(&requests, 1)
+		if n >= 2 && n <= 5 {
+			http.Error(w, "intermittent relay error", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"status":"ok"}`)
+	}))
+	defer server.Close()
+	m := NewTunnelManager()
+	m.set(TunnelInfo{Provider: "gradio", Status: "online", URL: server.URL})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.watchGradioNative(ctx, "gradio", server.URL, cancel, 10*time.Millisecond)
+		close(done)
+	}()
+	time.Sleep(125 * time.Millisecond)
+	if ctx.Err() != nil || m.entry("gradio").Status != "online" {
+		t.Fatalf("temporary relay faults caused URL rotation: %+v", m.entry("gradio"))
+	}
+	cancel()
+	<-done
 }

@@ -38,43 +38,35 @@ try{
  check(initial.barBg===initial.appBg,"Sidebar doesn't inherit Gradio bg "+JSON.stringify(initial));
  check(initial.centerError<1.1,"Chevron not centered "+initial.centerError);
  check(initial.accent==="#f97316","Original Gradio accent differs "+initial.accent);
- const edit=await evalJS(function(){
-  const a=document.querySelector("#gd-theme-color"),b=document.querySelector("#gd-theme-secondary");
-  a.value="#b14cf3";a.dispatchEvent(new Event("input",{bubbles:true}));
-  b.value="#2378d1";b.dispatchEvent(new Event("input",{bubbles:true}));
+ const collapsed=await evalJS(function(){
+  const absent=["gd-theme-color","gd-theme-secondary","gd-theme-reset"].every(id=>!document.getElementById(id));
   document.querySelector("#gd-sidebar-collapse").click();
-  return {accent:getComputedStyle(document.querySelector("gradio-app")).getPropertyValue("--primary-500").trim(),secondary:getComputedStyle(document.querySelector("gradio-app")).getPropertyValue("--secondary-500").trim(),collapsed:document.querySelector(".gd-layout").classList.contains("gd-collapsed"),stored:localStorage.getItem("goradio.theme.primary.v1"),width:document.querySelector(".gd-sidebar").getBoundingClientRect().width};
+  return {noEditor:absent,collapsed:document.querySelector(".gd-layout").classList.contains("gd-collapsed"),stored:localStorage.getItem("goradio.sidebar.collapsed.v1"),width:document.querySelector(".gd-sidebar").getBoundingClientRect().width};
  });
- check(edit.accent==="#b14cf3"&&edit.secondary==="#2378d1","Custom theme colors not propagated to Gradio "+JSON.stringify(edit));
- check(edit.collapsed&&edit.width<=72,"Sidebar collapse failed "+JSON.stringify(edit));
+ check(collapsed.noEditor,"Color editor unexpectedly exposed in production");
+ check(collapsed.collapsed&&collapsed.width<=72,"Sidebar collapse failed "+JSON.stringify(collapsed));
  await send("Page.navigate",{url:new URL(secondPage,origin).href});await wait(5200);
  const persisted=await evalJS(function(){
-  const app=document.querySelector("gradio-app"),computed=getComputedStyle(app),sidebar=document.querySelector(".gd-sidebar");
+  const app=document.querySelector("gradio-app"),sidebar=document.querySelector(".gd-sidebar");
   const before=getComputedStyle(sidebar).backgroundColor;
   document.body.classList.toggle("dark",false);
-  return {accent:computed.getPropertyValue("--primary-500").trim(),secondary:computed.getPropertyValue("--secondary-500").trim(),collapsed:document.querySelector(".gd-layout").classList.contains("gd-collapsed"),page:document.querySelector(".gd-nav-link.is-active")?.textContent.trim(),before,lightBg:getComputedStyle(sidebar).backgroundColor,lightAppBg:getComputedStyle(app).backgroundColor};
+  return {collapsed:document.querySelector(".gd-layout").classList.contains("gd-collapsed"),page:document.querySelector(".gd-nav-link.is-active")?.textContent.trim(),before,lightBg:getComputedStyle(sidebar).backgroundColor,lightAppBg:getComputedStyle(app).backgroundColor,hasEditor:!!document.querySelector("#gd-theme-color")};
  });
- check(persisted.accent==="#b14cf3"&&persisted.secondary==="#2378d1"&&persisted.collapsed,"Theme or collapse didn't persist "+JSON.stringify(persisted));
+ check(persisted.collapsed&&!persisted.hasEditor,"Collapse not persisted or UI contains theme editor "+JSON.stringify(persisted));
  check(persisted.lightBg===persisted.lightAppBg,"Light mode sidebar doesn't match Gradio "+JSON.stringify(persisted));
- const reset=await evalJS(function(){
-  document.querySelector("#gd-theme-reset").click();
-  const style=getComputedStyle(document.querySelector("gradio-app"));
-  return {accent:style.getPropertyValue("--primary-500").trim(),secondary:style.getPropertyValue("--secondary-500").trim(),stored:localStorage.getItem("goradio.theme.primary.v1")};
- });
- check(reset.accent==="#f97316"&&reset.secondary==="#3b82f6"&&reset.stored===null,"Reset failed "+JSON.stringify(reset));
  await send("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
  await send("Page.navigate",{url:new URL(mobilePage,origin).href});await wait(4800);
  const mobile=await evalJS(function(){
   const menu=document.querySelector("#gd-menu-toggle"),layout=document.querySelector(".gd-layout");
   menu.click();
   const rect=el=>{const r=el.getBoundingClientRect();return {x:r.x,w:r.width,h:r.height}};
-  const side=document.querySelector("#gd-sidebar"),input=document.querySelector("#gd-theme-color"),reset=document.querySelector("#gd-theme-reset");
-  return {width:window.innerWidth,open:layout.classList.contains("gd-menu-open"),side:rect(side),color:rect(input),reset:rect(reset),labels:[...document.querySelectorAll(".gd-theme-label")].map(el=>getComputedStyle(el).display),barBg:getComputedStyle(side).backgroundColor,appBg:getComputedStyle(document.querySelector("gradio-app")).backgroundColor};
+  const side=document.querySelector("#gd-sidebar");
+  return {width:window.innerWidth,open:layout.classList.contains("gd-menu-open"),side:rect(side),noEditor:!document.querySelector("#gd-theme-color"),barBg:getComputedStyle(side).backgroundColor,appBg:getComputedStyle(document.querySelector("gradio-app")).backgroundColor};
  });
  check(mobile.open,"Mobile menu failed to open "+JSON.stringify(mobile));
- check(mobile.side.x>=-1&&mobile.side.w<mobile.width&&mobile.color.w>15&&mobile.reset.w>15,"Mobile sidebar elements clipped "+JSON.stringify(mobile));
+ check(mobile.side.x>=-1&&mobile.side.w<mobile.width&&mobile.noEditor,"Mobile sidebar issue "+JSON.stringify(mobile));
  check(mobile.barBg===mobile.appBg,"Mobile theme background not inherited "+JSON.stringify(mobile));
  check(issues.length===0,"Browser issues "+JSON.stringify(issues.slice(0,6)));
- console.log(JSON.stringify({result:"PASS",initial,edit,persisted,reset,mobile,issues},null,2));
+ console.log(JSON.stringify({result:"PASS",initial,collapsed,persisted,mobile,issues},null,2));
 }catch(e){console.error("FAIL:",e.stack||e.message);process.exitCode=1}
 finally{try{ws?.close()}catch{}try{proc.kill()}catch{}}

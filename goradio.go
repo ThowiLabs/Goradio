@@ -33,7 +33,13 @@ type Component struct {
 	Value       any      `json:"value,omitempty"`
 	Choices     []string `json:"choices,omitempty"`
 }
+type Theme struct {
+	PrimaryColor   string `json:"primary_color,omitempty"`
+	SecondaryColor string `json:"secondary_color,omitempty"`
+}
+
 type Config struct {
+	Theme       *Theme      `json:"theme,omitempty"`
 	Title       string      `json:"title"`
 	Description string      `json:"description,omitempty"`
 	Inputs      []Component `json:"inputs"`
@@ -60,6 +66,9 @@ var fileID = regexp.MustCompile(`^[a-f0-9]{32}(\.[a-z0-9]{1,10})?$`)
 func New(config Config, handler Handler, mediaDir string) (*App, error) {
 	if handler == nil {
 		return nil, errors.New("handler obligatorio")
+	}
+	if err := validateTheme(config.Theme); err != nil {
+		return nil, err
 	}
 	if len(config.Outputs) == 0 {
 		return nil, errors.New("se requiere una salida")

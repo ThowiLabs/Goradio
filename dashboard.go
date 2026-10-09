@@ -110,6 +110,20 @@ func (d *Dashboard) Add(window Window) error {
 	d.apps[p] = app
 	return nil
 }
+
+// SetTheme applies the same Gradio theme to every window in a dashboard.
+// Configure it before serving requests; no theme editor is rendered to users.
+func (d *Dashboard) SetTheme(theme Theme) error {
+	if err := validateTheme(&theme); err != nil {
+		return err
+	}
+	for _, app := range d.apps {
+		copyTheme := theme
+		app.Config.Theme = &copyTheme
+	}
+	return nil
+}
+
 func (d *Dashboard) SetMediaDir(dir string) error {
 	if dir == "" {
 		return nil
@@ -352,22 +366,7 @@ func dashboardShell(info dashboardPageContext) (string, string, string) {
       <button id="gd-sidebar-collapse" class="gd-sidebar-collapse" type="button" title="Contraer barra lateral" aria-label="Contraer barra lateral" aria-controls="gd-sidebar" aria-expanded="true"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"></path></svg></button>
     </div>
     <nav class="gd-side-scroll" aria-label="Páginas"><div class="gd-nav-caption">VENTANAS</div>%s</nav>
-    <div class="gd-sidebar-footer">
-      <div class="gd-theme-controls" role="group" aria-label="Personalización de color Gradio">
-        <label class="gd-theme-label" for="gd-theme-color">Color del tema</label>
-        <div class="gd-theme-actions">
-          <input id="gd-theme-color" class="gd-theme-color" type="color" value="#f97316" title="Personalizar color principal de Gradio" aria-label="Color principal de Gradio">
-        </div>
-      </div>
-      <div class="gd-theme-controls" role="group" aria-label="Personalización del color secundario">
-        <label class="gd-theme-label" for="gd-theme-secondary">Color secundario</label>
-        <div class="gd-theme-actions">
-          <input id="gd-theme-secondary" class="gd-theme-color" type="color" value="#3b82f6" title="Personalizar color secundario de Gradio" aria-label="Color secundario de Gradio">
-          <button id="gd-theme-reset" class="gd-theme-reset" type="button" title="Restaurar los colores originales de Gradio" aria-label="Restaurar colores originales">↺</button>
-        </div>
-      </div>
-      <span class="gd-sidebar-footer-label">Tema original de Gradio</span>
-    </div>
+    <div class="gd-sidebar-footer"><span class="gd-sidebar-footer-label">Goradio</span></div>
   </aside>
   <div id="gd-backdrop" class="gd-backdrop" aria-hidden="true"></div>
   <main class="gd-main">
