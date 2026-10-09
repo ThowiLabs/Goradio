@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -58,7 +57,11 @@ func (m *TunnelManager) Start(ctx context.Context, port int, providers []string)
 			continue
 		}
 		m.set(TunnelInfo{Provider: p, Status: "starting"})
-		go m.run(ctx, p, name, args)
+		if p == "gradio" || p == "gradio_native" {
+			go m.runGradioNative(ctx, p, port)
+		} else {
+			go m.run(ctx, p, name, args)
+		}
 	}
 }
 func tunnelCommand(provider string, port int) (string, []string, error) {
@@ -72,12 +75,8 @@ func tunnelCommand(provider string, port int) (string, []string, error) {
 		return "ssh", []string{"-T", "-p", "443", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30", "-R", "0:" + local, "free.pinggy.io"}, nil
 	case "localtunnel":
 		return "lt", []string{"--port", fmt.Sprint(port)}, nil
-	case "gradio":
-		python := os.Getenv("GORADIO_PYTHON")
-		if python == "" {
-			python = "python"
-		}
-		return python, []string{"-u", "-m", "goradio.gradio_tunnel", "--port", fmt.Sprint(port)}, nil
+	case "gradio", "gradio_native":
+		return "native-go", []string{fmt.Sprint(port)}, nil
 	default:
 		return "", nil, fmt.Errorf("proveedor desconocido: %s", provider)
 	}
@@ -104,7 +103,7 @@ func parseTunnelURL(provider, s string) string {
 			allowed = strings.HasSuffix(h, ".pinggy.link") || strings.HasSuffix(h, ".pinggy.io") || strings.HasSuffix(h, ".pinggy.online")
 		case "localtunnel":
 			allowed = strings.HasSuffix(h, ".loca.lt") || strings.HasSuffix(h, ".localtunnel.me")
-		case "gradio":
+		case "gradio", "gradio_native":
 			allowed = strings.HasSuffix(h, ".gradio.live")
 		}
 		if allowed {
@@ -185,18 +184,7 @@ func (m *TunnelManager) run(ctx context.Context, provider, name string, args []s
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var cmd *exec.Cmd
-	var childInput io.WriteCloser
-	if provider == "gradio" {
-		cmd = exec.Command(name, args...)
-		input, err := cmd.StdinPipe()
-		if err != nil {
-			m.set(TunnelInfo{Provider: provider, Status: "error", Error: err.Error()})
-			return
-		}
-		childInput = input
-	} else {
-		cmd = exec.CommandContext(childCtx, name, args...)
-	}
+	cmd = exec.CommandContext(childCtx, name, args...)
 	writer := &tunnelWriter{m: m, provider: provider, ready: make(chan struct{})}
 	go func() {
 		timer := time.NewTimer(35 * time.Second)
@@ -210,24 +198,7 @@ func (m *TunnelManager) run(ctx context.Context, provider, name string, args []s
 	}()
 	cmd.Stdout = writer
 	cmd.Stderr = writer
-	finished := make(chan struct{})
-	if childInput != nil {
-		go func() {
-			<-childCtx.Done()
-			childInput.Close()
-			select {
-			case <-finished:
-			case <-time.After(5 * time.Second):
-				if cmd.Process != nil {
-					if err := cmd.Process.Kill(); err != nil {
-						log.Printf("finalizar Gradio: %v", err)
-					}
-				}
-			}
-		}()
-	}
 	err := cmd.Run()
-	close(finished)
 	if ctx.Err() != nil {
 		m.set(TunnelInfo{Provider: provider, Status: "closed"})
 		return

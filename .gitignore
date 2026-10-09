@@ -20,3 +20,6 @@ data/
 *.db
 *.db-wal
 *.db-shm
+
+# Cachés y archivos temporales locales
+.goradio/

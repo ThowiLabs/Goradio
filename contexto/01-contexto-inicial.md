@@ -29,7 +29,7 @@ Construir Goradio, un framework ligero escrito en Go inspirado en Gradio, con AP
 Go standard library. Python standard library. Dependencia externa opcional: gradio para túnel .gradio.live. Dependencias externas de CLI opcionales: cloudflared, OpenSSH, localtunnel.
 
 # Archivos importantes modificados
-go.mod, .gitignore, goradio.go, callback.go, tunnels.go, assets.go, cmd/goradio/main.go, static/index.html, static/app.css, static/app.js, python/pyproject.toml, python/goradio/__init__.py, python/goradio/gradio_tunnel.py, examples/*, goradio_test.go, python/tests/test_goradio.py, README.md.
+go.mod, .gitignore, goradio.go, callback.go, tunnels.go, assets.go, cmd/goradio/main.go, static/index.html, static/app.css, static/app.js, python/pyproject.toml, python/goradio/__init__.py, examples/*, goradio_test.go, python/tests/test_goradio.py, README.md.
 
 # Problemas encontrados
 - El entorno Conda 311 contiene un problema anterior con pip_system_certs (ASN1 NOT_ENOUGH_DATA).

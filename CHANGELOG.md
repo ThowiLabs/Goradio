@@ -1,5 +1,14 @@
 # Cambios
 
+## 0.3.3 — 2026-10-09
+- Túnel oficial `gradio.live` integrado nativamente en Go: `share=gradio` ya no descarga ni ejecuta `frpc`.
+- Conexión TLS/FRP, yamux, cifrado, compresión, control y conexiones de trabajo sin proceso externo.
+- Supervisión HTTP del enlace público, reconexión automática ante caída o expiración y URL siempre verificada.
+- Alias `gradio_native` y `gradio` compatibles con la conexión nativa; se elimina el cliente descargable y su proveedor anterior.
+- Dependencia FRP eliminada: estructuras de protocolo internas con licencia Apache 2.0, importación Go externa comprobada.
+- Pruebas de protocolo simulado, TLS, errores, Kill seguro, subida/descarga, concurrencia, `go test -race` y librería Python.
+
+
 ## 0.3.2 — 2026-10-09
 - Contraseñas de cuentas SQLite: mínimo 4 caracteres, incluyendo PIN de 4 dígitos; se rechazan vacías o solo espacios.
 - Inicio de sesión/registro: validación de usuario y contraseña no vacíos, sin eludir login habilitado.

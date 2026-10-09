@@ -3,9 +3,13 @@ module goradio
 go 1.24.0
 
 require (
+	github.com/fatedier/golib v0.1.1-0.20220321042308-c306138b83ac
+	github.com/hashicorp/yamux v0.1.1
 	golang.org/x/crypto v0.42.0
 	modernc.org/sqlite v1.38.2
 )
+
+require github.com/golang/snappy v0.0.1 // indirect
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
