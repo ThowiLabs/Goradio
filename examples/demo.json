@@ -1,0 +1,9 @@
+{
+  "title": "Goradio · Demo Go",
+  "description": "Servidor HTTP en Go, sin dependencias externas.",
+  "mode": "uppercase",
+  "inputs": [
+    {"type": "textbox", "label": "Tu mensaje", "placeholder": "Escribe texto", "required": true}
+  ],
+  "outputs": [{"type": "textbox", "label": "Resultado"}]
+}
