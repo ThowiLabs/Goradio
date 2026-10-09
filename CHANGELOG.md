@@ -1,5 +1,11 @@
 # Cambios
 
+## 0.3.1 — 2026-10-09
+- Corregida la demo de login: servidor local en `127.0.0.1:7916` iniciado y verificado.
+- Añadido script local para configurar `admin/admin` únicamente en la demo de desarrollo, sin rebajar el mínimo de contraseñas de la librería.
+- Añadida verificación HTTP automatizada del login local.
+
+
 ## 0.3.0 — 2026-10-09
 - Middleware de login y logout; altas administrativas y registro opcional.
 - Sesiones duraderas SQLite con contraseñas Argon2id, cookies HttpOnly, CSRF y rate limit básico.

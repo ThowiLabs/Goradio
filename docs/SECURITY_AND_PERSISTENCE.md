@@ -1,4 +1,9 @@
-# Goradio 0.3.0 — Login y persistencia
+# Goradio 0.3.1 — Login y persistencia
+
+## Acceso rápido a demo local (solo pruebas)
+
+En `http://127.0.0.1:7916/login` se creó la cuenta temporal `admin` / `admin` para una prueba exclusivamente local. Para volver a configurarla ejecuta desde la raíz del proyecto `go run ./scripts/dev/seed_local_admin.go` con el servidor de la demo detenido, y luego inicia `python examples/secure_demo.py`. **No utilices esas credenciales con túneles o despliegues públicos.** El requisito de contraseñas seguras de la API Go permanece intacto.
+
 
 Goradio es una biblioteca Go que sirve el frontend original Gradio y permite usar funciones tanto en **Go** como **Python**.
 
