@@ -53,6 +53,8 @@ The application is available at `http://127.0.0.1:7860`.
 - Python interface API and typed input components.
 - Text, number, slider, checkbox and dropdown support.
 - Image, audio, video, file and JSON components.
+- Bundled compiled Gradio 6.30.0 frontend.
+- Basic Gradio-compatible API and multimedia uploads.
 - Optional public sharing with supported tunnel providers.
 
 ## Public sharing
@@ -63,6 +65,7 @@ The application is available at `http://127.0.0.1:7860`.
 | localhost.run | `localhostrun` | SSH client installed |
 | Pinggy | `pinggy` | SSH client installed |
 | Localtunnel | `localtunnel` | Localtunnel CLI installed |
+| Gradio Live (experimental) | `gradio` | Python Gradio and compatible service |
 
 Launch multiple tunnels:
 
@@ -75,8 +78,10 @@ authentication and validate all user-provided values.
 
 ## Compatibility
 
-The project's initial UI and API are inspired by Gradio. They
-do not provide complete frontend or backend compatibility.
+The bundled Gradio frontend connects to a partial Go implementation
+of its backend protocol. Arbitrary Blocks layouts, full event queues,
+streaming and every component configuration are not supported.
+Frontend license and attribution: `third_party/gradio/`.
 
 ## Testing
 

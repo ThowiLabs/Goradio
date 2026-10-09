@@ -7,3 +7,7 @@ __pycache__/
 *.egg-info/
 .env
 .media/
+
+scripts/dev/_fixtures/
+
+scripts/dev/_screenshots/

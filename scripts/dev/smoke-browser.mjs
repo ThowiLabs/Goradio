@@ -1,0 +1,14 @@
+import {spawnSync} from "node:child_process";
+import {mkdtempSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+const chrome="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+const url=process.argv[2]??"http://127.0.0.1:7860/";
+const dir=mkdtempSync(join(tmpdir(),"goradio-browser-"));
+const dump=join(dir,"dom.html");
+const args=["--headless=new","--disable-gpu","--disable-extensions","--no-first-run","--no-default-browser-check","--disable-background-networking","--user-data-dir="+join(dir,"profile"),"--virtual-time-budget=15000","--dump-dom",url];
+const res=spawnSync(chrome,args,{encoding:"utf8",timeout:65000,maxBuffer:12*1024*1024});
+const html=res.stdout??"";
+writeFileSync(dump,html,"utf8");
+const checks=["gradio-app","Tu mensaje","Submit","Goradio · Demo Go","textarea","gradio-container","Error","Could not resolve app config"];
+console.log(JSON.stringify({exitCode:res.status,error:res.error?.message,chars:html.length,checks:Object.fromEntries(checks.map(x=>[x,html.includes(x)])),dump,first:html.slice(0,600),last:html.slice(-1100),stderr:(res.stderr??"").slice(-1200)},null,2));

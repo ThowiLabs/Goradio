@@ -1,0 +1,371 @@
+package goradio
+
+import (
+	"archive/zip"
+	"bytes"
+	"embed"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"mime"
+	"net/http"
+	"path"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+//go:embed third_party/gradio/frontend.zip
+var upstreamFrontend embed.FS
+
+var (
+	frontendOnce sync.Once
+	frontendFS   *zip.Reader
+	frontendErr  error
+)
+
+func loadFrontend() (*zip.Reader, error) {
+	frontendOnce.Do(func() {
+		data, err := upstreamFrontend.ReadFile("third_party/gradio/frontend.zip")
+		if err != nil {
+			frontendErr = err
+			return
+		}
+		frontendFS, frontendErr = zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	})
+	return frontendFS, frontendErr
+}
+
+var assetNames = regexp.MustCompile(`^(assets|static)/[a-zA-Z0-9_./-]+$`)
+
+func (a *App) gradioAsset(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if !assetNames.MatchString(name) || strings.Contains(name, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	archive, err := loadFrontend()
+	if err != nil {
+		http.Error(w, "frontend no disponible", 500)
+		return
+	}
+	f, err := archive.Open(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		http.Error(w, "error leyendo asset", 500)
+		return
+	}
+	typ := mime.TypeByExtension(path.Ext(name))
+	if typ == "" {
+		typ = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", typ)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, err = w.Write(data)
+	if err != nil {
+		log.Printf("asset %s: %v", name, err)
+	}
+}
+func (a *App) gradioIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	config := a.gradioConfig()
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		http.Error(w, "Error de configuración", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	// La interfaz, CSS y todos sus módulos son los del frontend oficial 6.30.0.
+	// El documento hospedador solo aporta la configuración nativa generada por Go.
+	fmt.Fprintf(w, `<!doctype html><html lang="es"><head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+ <meta name="referrer" content="no-referrer"><base href="/">
+ <link rel="stylesheet" href="/goradio-share.css">
+ <title>Goradio</title>
+ <script>window.gradio_config=%s;window.__gradio_mode__="app";window.iFrameResizer={autoResize:false,sizeWidth:false,onReady:()=>{}};</script>
+ <script type="module" crossorigin src="/assets/index-D88pgWqG.js"></script>
+ <script defer src="/goradio-share.js"></script>
+ <link rel="stylesheet" crossorigin href="/assets/index-DuOipanW.css">
+ </head><body style="margin:0;min-height:100vh;display:flex;flex-direction:column">
+ <gradio-app control_page_title="true" embed="false" eager="true" style="display:flex;flex-direction:column;flex-grow:1"></gradio-app>
+ </body></html>`, encoded)
+}
+
+type node map[string]any
+
+func branch(id int, children ...node) node { return node{"id": id, "children": children} }
+func leaf(id int) node                     { return node{"id": id} }
+func propsComponent(id int, kind string, props map[string]any) map[string]any {
+	return map[string]any{"id": id, "type": kind, "props": props, "skip_api": false, "component_class_id": id, "key": nil}
+}
+func (a *App) gradioConfig() map[string]any {
+	next := 0
+	id := func() int { next++; return next }
+	root := id()
+	// Organizar componentes como Gradio Interface: cabecera y dos columnas.
+	header := id()
+	columns := id()
+	left := id()
+	right := id()
+	inputs := []int{}
+	outputs := []int{}
+	all := []any{
+		propsComponent(root, "column", map[string]any{"visible": true, "variant": "default", "scale": 1, "min_width": 320}),
+		propsComponent(header, "markdown", map[string]any{"value": "# " + a.Config.Title + "\n\n" + a.Config.Description, "visible": true, "sanitize_html": true, "line_breaks": true, "header_links": false}),
+		propsComponent(columns, "row", map[string]any{"visible": true, "equal_height": false}),
+		propsComponent(left, "column", map[string]any{"visible": true, "scale": 1, "min_width": 320}),
+		propsComponent(right, "column", map[string]any{"visible": true, "scale": 1, "min_width": 320}),
+	}
+	// Los componentes ordinarios se mantienen como nodos. Los que declaran
+	// section se agrupan dentro de un Accordion real de Gradio.
+	type grouped struct {
+		id      int
+		section string
+	}
+	leftItems := []grouped{}
+	rightItems := []grouped{}
+	for _, c := range a.Config.Inputs {
+		n := id()
+		inputs = append(inputs, n)
+		all = append(all, propsComponent(n, gradioComponentName(c.Type), gradioComponentProps(c, true)))
+		leftItems = append(leftItems, grouped{id: n, section: c.Section})
+	}
+	for _, c := range a.Config.Outputs {
+		n := id()
+		outputs = append(outputs, n)
+		all = append(all, propsComponent(n, gradioComponentName(c.Type), gradioComponentProps(c, false)))
+		rightItems = append(rightItems, grouped{id: n, section: c.Section})
+	}
+	wrapSections := func(items []grouped) []node {
+		children := []node{}
+		last := ""
+		for _, item := range items {
+			label := strings.TrimSpace(item.section)
+			if label == "" {
+				children = append(children, leaf(item.id))
+				last = ""
+				continue
+			}
+			if last == label && len(children) > 0 {
+				previous := &children[len(children)-1]
+				(*previous)["children"] = append((*previous)["children"].([]node), leaf(item.id))
+			} else {
+				groupID := id()
+				all = append(all, propsComponent(groupID, "accordion", map[string]any{
+					"label": label, "open": false, "visible": true, "elem_id": nil,
+					"elem_classes": []string{},
+				}))
+				children = append(children, branch(groupID, leaf(item.id)))
+			}
+			last = label
+		}
+		return children
+	}
+	leftChildren := wrapSections(leftItems)
+	rightChildren := wrapSections(rightItems)
+	submit := id()
+	all = append(all, propsComponent(submit, "button", map[string]any{"value": "Submit", "variant": "primary", "visible": true, "size": "lg", "interactive": true}))
+	leftChildren = append(leftChildren, leaf(submit))
+	clear := id()
+	all = append(all, propsComponent(clear, "button", map[string]any{"value": "Clear", "variant": "secondary", "visible": true, "size": "sm", "interactive": true}))
+	rightChildren = append(rightChildren, leaf(clear))
+	deps := []any{
+		map[string]any{
+			"id": 0, "targets": []any{[]any{submit, "click"}}, "inputs": inputs, "outputs": outputs, "backend_fn": true,
+			"queue": false, "api_name": "predict", "api_description": nil, "scroll_to_output": true,
+			"show_progress": "full", "show_progress_on": nil, "batch": false, "max_batch_size": 4,
+			"cancels": []any{}, "types": map[string]bool{"generator": false, "cancel": false},
+			"collects_event_data": false, "trigger_after": nil, "trigger_only_on_success": false,
+			"trigger_only_on_failure": false, "trigger_mode": "once", "api_visibility": "public",
+			"rendered_in": nil, "render_id": nil, "connection": "sse", "time_limit": nil,
+			"stream_every": 0.5, "event_specific_args": nil, "component_prop_inputs": []int{},
+		},
+		map[string]any{
+			"id": 1, "targets": []any{[]any{clear, "click"}}, "inputs": []int{}, "outputs": append(append([]int{}, inputs...), outputs...), "backend_fn": true,
+			"js": nil, "queue": false, "api_name": "clear", "show_progress": "hidden",
+			"batch": false, "max_batch_size": 4, "cancels": []any{}, "types": map[string]bool{"generator": false, "cancel": false},
+			"collects_event_data": false, "trigger_mode": "once", "api_visibility": "private", "connection": "sse",
+			"event_specific_args": nil, "component_prop_inputs": []int{},
+		},
+	}
+	ids := make([]int, 0, next)
+	for n := 1; n <= next; n++ {
+		ids = append(ids, n)
+	}
+	layout := branch(root, leaf(header), branch(columns, branch(left, leftChildren...), branch(right, rightChildren...)))
+	cfg := map[string]any{
+		"version": "6.30.0", "api_prefix": "/gradio_api", "mode": "interface", "app_id": "goradio",
+		"dev_mode": false, "vibe_mode": false, "analytics_enabled": false, "components": all,
+		"css": nil, "connect_heartbeat": false, "js": nil, "head": nil, "title": a.Config.Title,
+		"space_id": nil, "enable_queue": false, "show_error": true, "footer_links": []any{},
+		"run_history": false, "is_colab": false, "max_file_size": a.MaxUploadBytes,
+		"stylesheets": []any{}, "theme": "default", "protocol": "sse_v3",
+		"body_css":    map[string]string{"body_background_fill": "white", "body_text_color": "#1f2937", "body_background_fill_dark": "#0b0f19", "body_text_color_dark": "#f3f4f6"},
+		"fill_height": false, "fill_width": false, "theme_hash": 0, "pwa": false,
+		"pages": []any{[]any{"", "", true}}, "current_page": "", "root": "",
+		"page":     map[string]any{"": map[string]any{"layout": layout, "components": ids, "dependencies": []int{0, 1}}},
+		"username": nil, "dependencies": deps, "layout": layout,
+	}
+	return cfg
+}
+func gradioComponentName(k string) string {
+	switch k {
+	case "json":
+		return "json"
+	case "checkbox":
+		return "checkbox"
+	default:
+		return k
+	}
+}
+func gradioComponentProps(c Component, input bool) map[string]any {
+	p := map[string]any{"label": c.Label, "visible": true, "interactive": input, "elem_id": nil, "elem_classes": []string{}, "show_label": true, "container": true, "scale": nil, "min_width": 160, "key": nil}
+	if c.Label == "" {
+		p["label"] = strings.ToUpper(c.Type[:1]) + c.Type[1:]
+	}
+	if c.Placeholder != "" {
+		p["placeholder"] = c.Placeholder
+	}
+	if c.Value != nil {
+		p["value"] = c.Value
+	}
+	if c.Min != nil {
+		p["minimum"] = *c.Min
+	}
+	if c.Max != nil {
+		p["maximum"] = *c.Max
+	}
+	if c.Step != nil {
+		p["step"] = *c.Step
+	}
+	switch c.Type {
+	case "textbox":
+		p["lines"] = 1
+		p["max_lines"] = 20
+		p["type"] = "text"
+		p["submit_btn"] = false
+		p["stop_btn"] = false
+	case "slider":
+		if c.Min == nil {
+			p["minimum"] = 0
+		}
+		if c.Max == nil {
+			p["maximum"] = 100
+		}
+		if c.Step == nil {
+			p["step"] = 1
+		}
+		if c.Value == nil {
+			p["value"] = p["minimum"]
+		}
+	case "number":
+		p["precision"] = nil
+	case "dropdown":
+		options := []any{}
+		for _, v := range c.Choices {
+			options = append(options, []string{v, v})
+		}
+		p["choices"] = options
+		p["allow_custom_value"] = false
+		p["multiselect"] = false
+		p["filterable"] = true
+	case "image":
+		p["sources"] = []string{"upload", "clipboard"}
+		p["type"] = "filepath"
+		p["image_mode"] = "RGB"
+		p["buttons"] = []string{"fullscreen", "download"}
+		p["streaming"] = false
+		p["format"] = "webp"
+	case "audio":
+		p["sources"] = []string{"upload", "microphone"}
+		p["type"] = "filepath"
+		p["format"] = "wav"
+		p["waveform_options"] = map[string]any{
+			"waveform_color":          "#9ca3af",
+			"waveform_progress_color": "#f97316",
+			"trim_region_color":       "#f9731660",
+			"show_recording_waveform": true,
+			"skip_length":             5,
+			"sample_rate":             44100,
+			"show_controls":           false,
+		}
+		p["editable"] = input
+		p["buttons"] = []string{"download"}
+		p["loop"] = false
+		p["minimal"] = false
+		p["playback_position"] = 0
+		p["streaming"] = false
+		p["autoplay"] = false
+	case "video":
+		p["sources"] = []string{"upload"}
+		p["format"] = "mp4"
+		p["webcam_options"] = map[string]any{"mirror": false, "constraints": map[string]any{}}
+		p["include_audio"] = true
+		p["autoplay"] = false
+		p["loop"] = false
+		p["show_download_button"] = true
+	case "file":
+		p["file_count"] = "single"
+		p["file_types"] = nil
+	case "json":
+		p["value"] = map[string]any{}
+	}
+	return p
+}
+func (a *App) gradioConfigResponse(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, a.gradioConfig())
+}
+func (a *App) gradioTheme(w http.ResponseWriter, r *http.Request) {
+	theme, err := assets.ReadFile("static/gradio-default-theme.css")
+	if err != nil {
+		http.Error(w, "No se encontró el tema original de Gradio", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if _, err := w.Write(theme); err != nil {
+		log.Printf("Error enviando CSS de Gradio: %v", err)
+	}
+}
+func (a *App) gradioInfo(w http.ResponseWriter, r *http.Request) {
+	// Contrato mínimo legible por @gradio/client; evolucionará con el soporte Blocks.
+	p := []any{}
+	ret := []any{}
+	for i, c := range a.Config.Inputs {
+		p = append(p, map[string]any{"label": c.Label, "parameter_name": "param_" + strconv.Itoa(i), "component": gradioComponentName(c.Type), "type": map[string]any{"type": "string"}, "python_type": map[string]string{"type": "str", "description": ""}, "example_input": "", "parameter_has_default": false})
+	}
+	for _, c := range a.Config.Outputs {
+		ret = append(ret, map[string]any{"label": c.Label, "component": gradioComponentName(c.Type), "type": map[string]any{"type": "string"}, "python_type": map[string]string{"type": "str", "description": ""}})
+	}
+	writeJSON(w, 200, map[string]any{"named_endpoints": map[string]any{"/predict": map[string]any{"parameters": p, "returns": ret, "api_visibility": "public", "show_api": true}}, "unnamed_endpoints": map[string]any{}})
+}
+
+func (a *App) gradioFavicon(w http.ResponseWriter, r *http.Request) {
+	archive, err := loadFrontend()
+	if err != nil {
+		http.Error(w, "Error de interfaz", 500)
+		return
+	}
+	file, err := archive.Open("favicon.png")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if _, err = io.Copy(w, file); err != nil {
+		log.Printf("favicon: %v", err)
+	}
+}

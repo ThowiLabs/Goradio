@@ -33,6 +33,7 @@ _TYPES = {"textbox", "number", "slider", "checkbox", "dropdown",
 class Component:
     type: str
     label: str = ""
+    section: str = ""
     placeholder: str = ""
     required: bool = False
     min: float | None = None

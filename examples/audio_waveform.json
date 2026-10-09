@@ -1,0 +1,17 @@
+{
+  "title": "Goradio Audio · Waveform",
+  "description": "Prueba del reproductor nativo de Gradio con forma de onda",
+  "mode": "echo",
+  "inputs": [
+    {
+      "type": "audio",
+      "label": "Audio de entrada"
+    }
+  ],
+  "outputs": [
+    {
+      "type": "audio",
+      "label": "Audio procesado"
+    }
+  ]
+}

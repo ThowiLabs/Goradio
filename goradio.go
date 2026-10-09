@@ -17,12 +17,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Component struct {
 	Type        string   `json:"type"`
 	Label       string   `json:"label,omitempty"`
+	Section     string   `json:"section,omitempty"`
 	Placeholder string   `json:"placeholder,omitempty"`
 	Required    bool     `json:"required,omitempty"`
 	Min         *float64 `json:"min,omitempty"`
@@ -44,6 +46,10 @@ type App struct {
 	MediaDir       string
 	MaxUploadBytes int64
 	tunnels        *TunnelManager
+	jobsMu         sync.Mutex
+	jobs           map[string]*gradioJob
+	uploadsMu      sync.Mutex
+	uploads        map[string]*uploadState
 }
 
 var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "image": true, "audio": true, "video": true, "file": true, "json": true}
@@ -76,7 +82,7 @@ func New(config Config, handler Handler, mediaDir string) (*App, error) {
 	if config.Title == "" {
 		config.Title = "Goradio"
 	}
-	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager()}, nil
+	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager(), jobs: map[string]*gradioJob{}, uploads: map[string]*uploadState{}}, nil
 }
 
 func (a *App) Routes() http.Handler {
@@ -89,7 +95,38 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /api/predict", a.predict)
 	mux.HandleFunc("POST /api/upload", a.upload)
 	mux.HandleFunc("GET /api/media/{file}", a.media)
-	mux.Handle("/", assetHandler())
+
+	mux.HandleFunc("GET /config", a.gradioConfigResponse)
+	mux.HandleFunc("GET /config/", a.gradioConfigResponse)
+	mux.HandleFunc("GET /gradio_api/config", a.gradioConfigResponse)
+	mux.HandleFunc("GET /gradio_api/info", a.gradioInfo)
+	mux.HandleFunc("GET /gradio_api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	mux.HandleFunc("GET /theme.css", a.gradioTheme)
+	mux.HandleFunc("GET /assets/", a.gradioAsset)
+	mux.HandleFunc("GET /static/", a.gradioAsset)
+	mux.HandleFunc("POST /gradio_api/run/predict", a.gradioPredict)
+	mux.HandleFunc("POST /gradio_api/run/clear", a.gradioReset)
+	mux.HandleFunc("POST /gradio_api/api/predict", a.gradioPredict)
+	mux.HandleFunc("POST /gradio_api/call/predict", a.gradioCall)
+	mux.HandleFunc("GET /gradio_api/call/predict/{id}", a.gradioEvent)
+	mux.HandleFunc("POST /gradio_api/upload", a.gradioUpload)
+	mux.HandleFunc("GET /gradio_api/upload_progress", a.gradioUploadProgress)
+	mux.HandleFunc("GET /gradio_api/{rest...}", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/gradio_api/file=") {
+			a.gradioFile(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("GET /favicon.ico", a.gradioFavicon)
+	mux.HandleFunc("GET /favicon.png", a.gradioFavicon)
+	mux.Handle("GET /classic/", http.StripPrefix("/classic/", assetHandler()))
+	mux.Handle("GET /app.js", assetHandler())
+	mux.Handle("GET /goradio-share.js", assetHandler())
+	mux.Handle("GET /goradio-share.css", assetHandler())
+	mux.Handle("GET /app.css", assetHandler())
+	mux.HandleFunc("GET /", a.gradioIndex)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -140,6 +177,18 @@ func (a *App) Serve(ctx context.Context, host string, port int, providers []stri
 	}
 	return err
 }
+
+type predictionFailure struct {
+	status  int
+	code    string
+	message string
+}
+
+func (e *predictionFailure) Error() string { return e.message }
+func failPrediction(status int, code, message string) error {
+	return &predictionFailure{status, code, message}
+}
+
 func (a *App) predict(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	defer r.Body.Close()
@@ -150,62 +199,69 @@ func (a *App) predict(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "JSON_INVALIDO", "Solicitud inválida")
 		return
 	}
-	if len(req.Data) != len(a.Config.Inputs) {
-		apiError(w, 400, "CANTIDAD_INVALIDA", "Número de entradas incorrecto")
+	results, err := a.predictValues(r.Context(), req.Data)
+	if err != nil {
+		writePredictionError(w, err)
 		return
 	}
-	values := make([]any, len(req.Data))
+	writeJSON(w, 200, map[string]any{"data": results})
+}
+func writePredictionError(w http.ResponseWriter, err error) {
+	var problem *predictionFailure
+	if errors.As(err, &problem) {
+		apiError(w, problem.status, problem.code, problem.message)
+		return
+	}
+	log.Printf("handler: %v", err)
+	apiError(w, 500, "EJECUCION", "No se pudo ejecutar la función")
+}
+func (a *App) predictValues(ctx context.Context, data []any) ([]any, error) {
+	if len(data) != len(a.Config.Inputs) {
+		return nil, failPrediction(400, "CANTIDAD_INVALIDA", "Número de entradas incorrecto")
+	}
+	values := make([]any, len(data))
 	for i, c := range a.Config.Inputs {
-		v, err := a.validate(c, req.Data[i])
+		v, err := a.validate(c, data[i])
 		if err != nil {
-			apiError(w, 400, "VALIDACION", fmt.Sprintf("Entrada %d: %v", i+1, err))
-			return
+			return nil, failPrediction(400, "VALIDACION", fmt.Sprintf("Entrada %d: %v", i+1, err))
 		}
 		values[i] = v
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	results, err := a.Handler(ctx, values)
+	results, err := a.Handler(timeoutCtx, values)
 	if err != nil {
-		log.Printf("handler: %v", err)
-		apiError(w, 500, "EJECUCION", "No se pudo ejecutar la función")
-		return
+		return nil, err
 	}
 	if len(results) != len(a.Config.Outputs) {
-		apiError(w, 500, "SALIDAS", "La función devolvió una cantidad incorrecta de salidas")
-		return
+		return nil, failPrediction(500, "SALIDAS", "La función devolvió una cantidad incorrecta de salidas")
 	}
 	for i, c := range a.Config.Outputs {
 		if !isMedia(c.Type) {
 			continue
 		}
-		s, ok := results[i].(string)
-		if !ok || s == "" {
+		value, ok := results[i].(string)
+		if !ok || value == "" {
 			continue
 		}
-		path := filepath.Clean(s)
 		base, err := filepath.Abs(a.MediaDir)
 		if err != nil {
-			apiError(w, 500, "ARCHIVO", "Ruta inválida")
-			return
+			return nil, failPrediction(500, "ARCHIVO", "Ruta inválida")
 		}
-		abs, err := filepath.Abs(path)
+		abs, err := filepath.Abs(filepath.Clean(value))
 		if err != nil {
-			apiError(w, 500, "ARCHIVO", "Ruta inválida")
-			return
+			return nil, failPrediction(500, "ARCHIVO", "Ruta inválida")
 		}
 		rel, err := filepath.Rel(base, abs)
 		if err != nil || rel == "." || strings.HasPrefix(rel, "..") || strings.Contains(rel, string(filepath.Separator)) || !fileID.MatchString(rel) {
-			apiError(w, 400, "ARCHIVO", "La salida multimedia debe registrarse con goradio.media(ruta)")
-			return
+			return nil, failPrediction(400, "ARCHIVO", "La salida multimedia debe registrarse con goradio.media(ruta)")
 		}
 		if _, err := os.Stat(abs); err != nil {
-			apiError(w, 400, "ARCHIVO", "Archivo de salida no encontrado")
-			return
+			return nil, failPrediction(400, "ARCHIVO", "Archivo de salida no encontrado")
 		}
 		results[i] = "/api/media/" + rel
 	}
-	writeJSON(w, 200, map[string]any{"data": results})
+	return results, nil
 }
 func (a *App) validate(c Component, v any) (any, error) {
 	if v == nil {
@@ -221,10 +277,12 @@ func (a *App) validate(c Component, v any) (any, error) {
 		return v, nil
 	}
 	switch c.Type {
-	case "textbox", "json":
+	case "textbox":
 		if _, ok := v.(string); !ok {
 			return nil, errors.New("debe ser texto")
 		}
+	case "json":
+		return v, nil
 	case "number", "slider":
 		n, ok := v.(float64)
 		if !ok || math.IsInf(n, 0) || math.IsNaN(n) {
@@ -307,6 +365,10 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "EXTENSION", "Extensión inválida")
 		return
 	}
+	if !safeExt[ext] {
+		apiError(w, 400, "EXTENSION", "Extensión no permitida")
+		return
+	}
 	if !validMediaType(kind, mime, ext) {
 		apiError(w, 400, "TIPO", "El archivo no corresponde al tipo seleccionado")
 		return
@@ -356,6 +418,7 @@ func (a *App) media(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	setSafeMediaHeaders(w, id)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	http.ServeFile(w, r, filepath.Join(a.MediaDir, id))
 }
