@@ -240,3 +240,79 @@ func TestSecurityMediaFilesBelongToTheirOwner(t *testing.T) {
 		t.Fatalf("Otro usuario puede leer el archivo: %d", stranger.Code)
 	}
 }
+
+func TestPasswordMinimumFourAndNonEmpty(t *testing.T) {
+	for _, v := range []string{"", " ", "   ", "123", "abc"} {
+		if _, err := passwordHash(v); err == nil {
+			t.Fatalf("Contraseña demasiado corta o vacía aceptada: %q", v)
+		}
+	}
+	for _, v := range []string{"1234", "abcd", "abcd5678"} {
+		encoded, err := passwordHash(v)
+		if err != nil {
+			t.Fatalf("Contraseña %q rechazada: %v", v, err)
+		}
+		if !verifyPassword(encoded, v) {
+			t.Fatalf("La contraseña de 4+ caracteres no se pudo verificar: %q", v)
+		}
+	}
+}
+func TestSecurityFourDigitPINAndEmptyLogin(t *testing.T) {
+	app := secureApp(t, filepath.Join(t.TempDir(), "pin.sqlite"), true)
+	defer app.Close()
+	if err := app.CreateUser(context.Background(), "pinuser", "1234", "user"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.CreateUser(context.Background(), "nobody", "", "user"); err == nil {
+		t.Fatal("Se creó cuenta con contraseña vacía")
+	}
+	for _, fields := range []map[string]string{
+		{"username": "pinuser", "password": ""},
+		{"username": "", "password": "1234"},
+		{"username": "  ", "password": "   "},
+	} {
+		resp := serveSecure(app, http.MethodPost, "/auth/login", fields, nil, "")
+		if resp.Code != http.StatusBadRequest {
+			t.Fatalf("Se aceptaron campos vacíos: %d, %v", resp.Code, fields)
+		}
+	}
+	valid := serveSecure(app, http.MethodPost, "/auth/login", map[string]string{"username": "pinuser", "password": "1234"}, nil, "")
+	if valid.Code != http.StatusOK {
+		t.Fatalf("PIN 1234 no autentica: %d %s", valid.Code, valid.Body.String())
+	}
+}
+func TestLegacyBasicOptionalButNoPartialCredentials(t *testing.T) {
+	app := testApp(t, nil, []Component{{Type: "textbox"}}, BuiltinHandler("echo"))
+	t.Setenv("GORADIO_AUTH_USER", "")
+	t.Setenv("GORADIO_AUTH_PASSWORD", "")
+	ok := httptest.NewRecorder()
+	app.Routes().ServeHTTP(ok, httptest.NewRequest("GET", "/api/health", nil))
+	if ok.Code != 200 {
+		t.Fatalf("Sin credenciales debería estar desactivado Basic: %d", ok.Code)
+	}
+	t.Setenv("GORADIO_AUTH_USER", "demo")
+	incomplete := httptest.NewRecorder()
+	app.Routes().ServeHTTP(incomplete, httptest.NewRequest("GET", "/api/health", nil))
+	if incomplete.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Usuario sin contraseña no debe activar autenticación incompleta: %d", incomplete.Code)
+	}
+	t.Setenv("GORADIO_AUTH_PASSWORD", "123")
+	tooShort := httptest.NewRecorder()
+	app.Routes().ServeHTTP(tooShort, httptest.NewRequest("GET", "/api/health", nil))
+	if tooShort.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Basic con contraseña menor a cuatro caracteres debe rechazarse: %d", tooShort.Code)
+	}
+	t.Setenv("GORADIO_AUTH_PASSWORD", "1234")
+	missing := httptest.NewRecorder()
+	app.Routes().ServeHTTP(missing, httptest.NewRequest("GET", "/api/health", nil))
+	if missing.Code != http.StatusUnauthorized {
+		t.Fatalf("Basic configurado sin credenciales enviadas: %d", missing.Code)
+	}
+	request := httptest.NewRequest("GET", "/api/health", nil)
+	request.SetBasicAuth("demo", "1234")
+	authorized := httptest.NewRecorder()
+	app.Routes().ServeHTTP(authorized, request)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("Basic PIN de 4 caracteres no funciona: %d", authorized.Code)
+	}
+}

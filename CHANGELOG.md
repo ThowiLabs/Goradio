@@ -1,5 +1,15 @@
 # Cambios
 
+## 0.3.2 — 2026-10-09
+- Contraseñas de cuentas SQLite: mínimo 4 caracteres, incluyendo PIN de 4 dígitos; se rechazan vacías o solo espacios.
+- Inicio de sesión/registro: validación de usuario y contraseña no vacíos, sin eludir login habilitado.
+- Python HTTP Basic: `auth=None` o `auth=("", "")` desactiva Basic; configuración parcial rechazada; clave configurada mínimo 4.
+- Go HTTP Basic: credenciales incompletas o clave menor a 4 devuelven error de configuración.
+- Nuevas pruebas Go/Python y documentación de la regla.
+- Corregido el reinicio de la biblioteca Python cuando la carpeta multimedia persistente ya existe.
+- Selección opcional del ejecutable de Go mediante `GORADIO_BINARY`, para probar nuevas versiones sin cerrar otros servidores.
+
+
 ## 0.3.1 — 2026-10-09
 - Corregida la demo de login: servidor local en `127.0.0.1:7916` iniciado y verificado.
 - Añadido script local para configurar `admin/admin` únicamente en la demo de desarrollo, sin rebajar el mínimo de contraseñas de la librería.

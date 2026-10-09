@@ -140,8 +140,14 @@ func (a *App) Close() error {
 	return err
 }
 func passwordHash(password string) (string, error) {
-	if len([]rune(password)) < 12 || len(password) > 1024 {
-		return "", errors.New("la contraseña debe contener entre 12 y 1024 caracteres")
+	// Permite claves simples como un PIN de cuatro dígitos; el almacenamiento
+	// sigue protegido con sal y Argon2id.
+	// El campo vacío nunca genera una contraseña válida.
+	if strings.TrimSpace(password) == "" {
+		return "", errors.New("la contraseña no puede estar vacía")
+	}
+	if len([]rune(password)) < 4 || len(password) > 1024 {
+		return "", errors.New("la contraseña debe contener al menos 4 caracteres (máximo 1024 bytes)")
 	}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
@@ -384,7 +390,7 @@ func (a *App) loginPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acceso a Goradio</title>
  <style>body{background:#111827;color:#fafafa;font:16px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;padding:20px}form{display:grid;gap:14px;background:#1f2937;border:1px solid #374151;border-radius:16px;padding:32px;width:min(100%%,390px);box-sizing:border-box}h1{margin:0;font-size:26px}p{margin:0;color:#cbd5e1}label{display:grid;gap:6px}input{padding:12px;border:1px solid #64748b;border-radius:7px;font:inherit;color:#fff;background:#111827}button{background:#f97316;border:0;border-radius:8px;padding:13px;font-size:16px;font-weight:700;cursor:pointer}#status{min-height:20px;color:#fca5a5}</style></head><body><form id="form"><h1>Goradio</h1><p>Inicia sesión para continuar.</p><label>Usuario<input name="username" autocomplete="username" required minlength="3"></label><label>Contraseña<input type="password" name="password" autocomplete="current-password" required></label><button id="action">Entrar</button><a id="register-link" href="#" style="color:#fdba74;display:none;text-align:center">Crear cuenta</a><span id="status"></span></form>
- <script>const signupAllowed=%t;let registering=false;const link=document.querySelector("#register-link");if(signupAllowed){link.style.display="block";link.onclick=e=>{e.preventDefault();registering=!registering;document.querySelector("#action").textContent=registering?"Crear cuenta":"Entrar";link.textContent=registering?"Ya tengo cuenta":"Crear cuenta";document.querySelector("#status").textContent=""}}document.querySelector("#form").addEventListener("submit",async e=>{e.preventDefault();const f=e.target;const v=Object.fromEntries(new FormData(f));const status=document.querySelector("#status");status.textContent="";try{const res=await fetch(registering?"/auth/signup":"/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v)});if(!res.ok)throw Error(registering?"No se pudo crear la cuenta. Verifica usuario y contraseña (mínimo 12 caracteres).":"Usuario o contraseña incorrectos");location.replace("/")}catch(err){status.textContent=err.message}})</script></body></html>`, a.security.cfg.AllowSignup)
+ <script>const signupAllowed=%t;let registering=false;const link=document.querySelector("#register-link");if(signupAllowed){link.style.display="block";link.onclick=e=>{e.preventDefault();registering=!registering;document.querySelector("#action").textContent=registering?"Crear cuenta":"Entrar";link.textContent=registering?"Ya tengo cuenta":"Crear cuenta";document.querySelector("#status").textContent=""}}document.querySelector("#form").addEventListener("submit",async e=>{e.preventDefault();const f=e.target;const v=Object.fromEntries(new FormData(f));const status=document.querySelector("#status");status.textContent="";try{const res=await fetch(registering?"/auth/signup":"/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v)});if(!res.ok)throw Error(registering?"No se pudo crear la cuenta. Verifica usuario y contraseña (mínimo 4 caracteres).":"Usuario o contraseña incorrectos");location.replace("/")}catch(err){status.textContent=err.message}})</script></body></html>`, a.security.cfg.AllowSignup)
 }
 func (a *App) limitedLogin(r *http.Request) bool {
 	ip := r.RemoteAddr
@@ -422,6 +428,10 @@ func (a *App) loginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Solicitud inválida", 400)
 		return
 	}
+	if strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
+		http.Error(w, "Introduce usuario y contraseña", http.StatusBadRequest)
+		return
+	}
 	id, err := a.userLogin(r.Context(), req.Username, req.Password)
 	if err != nil {
 		http.Error(w, "Credenciales incorrectas", 401)
@@ -449,6 +459,10 @@ func (a *App) signupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Solicitud inválida", 400)
+		return
+	}
+	if strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
+		http.Error(w, "Introduce usuario y contraseña", http.StatusBadRequest)
 		return
 	}
 	if err := a.CreateUser(r.Context(), req.Username, req.Password, "user"); err != nil {

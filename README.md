@@ -94,6 +94,9 @@ demo.launch(security={
 Set the initial password as described in the
 [security guide](docs/SECURITY_AND_PERSISTENCE.md).
 
+Blank credentials are rejected. Passwords must have at least four
+characters; use long, unique values for public applications.
+
 ## Compatibility
 
 The bundled Gradio frontend connects to a partial Go implementation

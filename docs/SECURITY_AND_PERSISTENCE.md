@@ -1,8 +1,11 @@
-# Goradio 0.3.1 — Login y persistencia
+# Goradio 0.3.2 — Login y persistencia
 
 ## Acceso rápido a demo local (solo pruebas)
 
-En `http://127.0.0.1:7916/login` se creó la cuenta temporal `admin` / `admin` para una prueba exclusivamente local. Para volver a configurarla ejecuta desde la raíz del proyecto `go run ./scripts/dev/seed_local_admin.go` con el servidor de la demo detenido, y luego inicia `python examples/secure_demo.py`. **No utilices esas credenciales con túneles o despliegues públicos.** El requisito de contraseñas seguras de la API Go permanece intacto.
+En `http://127.0.0.1:7916/login` se creó la cuenta temporal `admin` / `admin` para una prueba exclusivamente local. Para volver a configurarla ejecuta desde la raíz del proyecto `go run ./scripts/dev/seed_local_admin.go` con el servidor de la demo detenido, y luego inicia `python examples/secure_demo.py`. **No utilices esas credenciales con túneles o despliegues públicos.**
+
+**Validación en 0.3.2:** para crear cuentas se exige una contraseña de **4 caracteres como mínimo** (por ejemplo, un PIN de cuatro números). Los campos usuario/contraseña vacíos se rechazan al intentar entrar o registrarse. El `auth=None` de Python, o `auth=("", "")`, deja desactivado **HTTP Basic**, y si una credencial está vacía y la otra no, es un error de configuración. Un login SQLite configurado como obligatorio **nunca** se desactiva por dejar campos del formulario vacíos. Para aplicaciones públicas conviene usar contraseñas más largas y únicas.
+ El requisito de contraseñas seguras de la API Go permanece intacto.
 
 
 Goradio es una biblioteca Go que sirve el frontend original Gradio y permite usar funciones tanto en **Go** como **Python**.
@@ -14,13 +17,15 @@ En PowerShell:
 ```powershell
 cd C:\Users\Admin\Documents\GitHub\Goradio
 conda activate 311
-$env:GORADIO_ADMIN_PASSWORD = Read-Host "Contraseña nueva (mínimo 12 caracteres)"
+$env:GORADIO_ADMIN_PASSWORD = Read-Host "Contraseña nueva (mínimo 4 caracteres)"
 python examples/secure_demo.py
 ```
 
 Abrir http://127.0.0.1:7916/ . Usuario: `admin`, contraseña: la que configuraste. En el segundo inicio la base de datos conserva las cuentas y ya no es necesaria la variable de bootstrap.
 
 **Advertencia**: para trabajar en producción no introduzcas secretos en scripts ni los publiques en Git. Nunca conectes un túnel público a una aplicación sin autenticación y medidas de seguridad apropiadas.
+
+Si otra aplicación ya está utilizando el ejecutable `bin/goradio.exe` en Windows, puedes compilar una versión aparte (`go build -o bin/goradio-v0.3.2.exe ./cmd/goradio`) y establecer `$env:GORADIO_BINARY = "C:\\Users\\Admin\\Documents\\GitHub\\Goradio\\bin\\goradio-v0.3.2.exe"` antes de iniciar la aplicación Python. De ese modo no tienes que cerrar las demás instancias.
 
 La base SQLite queda en `data/secure-demo.sqlite`; los archivos multimedia en `data/goradio-media-secure-demo/`. Esas carpetas se ignoran en Git.
 

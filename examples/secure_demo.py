@@ -1,7 +1,7 @@
 """Ejemplo de aplicación con login y formularios persistentes.
 
 Primer arranque:
-    $env:GORADIO_ADMIN_PASSWORD = Read-Host "Contraseña admin (mínimo 12 caracteres)"
+    $env:GORADIO_ADMIN_PASSWORD = Read-Host "Contraseña admin (mínimo 4 caracteres)"
     python examples/secure_demo.py
 
 Elige una contraseña fuerte. El hash se guarda en SQLite, no en este archivo.

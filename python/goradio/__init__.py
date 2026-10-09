@@ -100,6 +100,22 @@ def _components(value: Any) -> list[Component]:
     return result
 
 
+def _normalize_auth(auth):
+    """Valida HTTP Basic: sin credenciales no se habilita; una sola es error."""
+    if auth is None:
+        return None
+    if not isinstance(auth, (tuple, list)) or len(auth) != 2 or any(not isinstance(v, str) for v in auth):
+        raise ValueError("auth requiere (usuario, contraseña)")
+    user, password = auth
+    if not user.strip() and not password.strip():
+        return None
+    if not user.strip() or not password.strip():
+        raise ValueError("usuario y contraseña deben estar completos; usa auth=None para no aplicar login")
+    if len(password) < 4:
+        raise ValueError("la contraseña debe contener al menos 4 caracteres")
+    return (user, password)
+
+
 class Interface:
     def __init__(self, fn: Callable, inputs: Any, outputs: Any,
                  title: str = "Goradio", description: str = "") -> None:
@@ -127,6 +143,7 @@ class Interface:
         share=["cloudflare", "localhostrun", "pinggy"] personaliza proveedores.
         """
         global _MEDIA_ROOT
+        auth = _normalize_auth(auth)
         if self._process is not None:
             raise RuntimeError("Interface ya iniciada")
         if not (0 < server_port <= 65535):
@@ -134,7 +151,11 @@ class Interface:
         providers = ["cloudflare", "localhostrun", "pinggy"] if share is True else (
             list(share) if share else [])
         root = Path(__file__).resolve().parents[2]
-        binary = root / "bin" / ("goradio.exe" if os.name == "nt" else "goradio")
+        custom_binary = os.getenv("GORADIO_BINARY", "").strip()
+        binary = (Path(custom_binary).expanduser().resolve() if custom_binary
+                  else root / "bin" / ("goradio.exe" if os.name == "nt" else "goradio"))
+        if custom_binary and not binary.is_file():
+            raise FileNotFoundError(f"El binario GORADIO_BINARY no existe: {binary}")
         if not binary.exists() and not shutil.which("go"):
             raise FileNotFoundError("Instala Go o compila bin/goradio.exe")
         self._temporary = tempfile.TemporaryDirectory(prefix="goradio-")
@@ -152,7 +173,7 @@ class Interface:
             media_dir = db_path.parent / ("goradio-media-" + app_id)
         else:
             media_dir = workdir / "media"
-        media_dir.mkdir(mode=0o700)
+        media_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         _MEDIA_ROOT = media_dir
 
         token = secrets.token_urlsafe(32)

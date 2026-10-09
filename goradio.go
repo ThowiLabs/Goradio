@@ -137,6 +137,10 @@ func (a *App) Routes() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		user, pass := os.Getenv("GORADIO_AUTH_USER"), os.Getenv("GORADIO_AUTH_PASSWORD")
 		if a.security == nil && (user != "" || pass != "") {
+			if strings.TrimSpace(user) == "" || strings.TrimSpace(pass) == "" || len([]rune(pass)) < 4 {
+				http.Error(w, "Configuración de autenticación incompleta o contraseña demasiado corta", http.StatusServiceUnavailable)
+				return
+			}
 			givenUser, givenPass, ok := r.BasicAuth()
 			matchUser := subtle.ConstantTimeCompare([]byte(givenUser), []byte(user)) == 1
 			matchPass := subtle.ConstantTimeCompare([]byte(givenPass), []byte(pass)) == 1

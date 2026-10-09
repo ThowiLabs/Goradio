@@ -27,5 +27,19 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual(gr.Dropdown(["A", "B"]).config()["choices"], ["A", "B"])
 
 
+
+    def test_empty_auth_disables_basic(self):
+        self.assertIsNone(gr._normalize_auth(None))
+        self.assertIsNone(gr._normalize_auth(("", "")))
+        self.assertIsNone(gr._normalize_auth(("  ", "  ")))
+
+    def test_four_digit_pin_accepted(self):
+        self.assertEqual(gr._normalize_auth(("admin", "1234")), ("admin", "1234"))
+
+    def test_incomplete_or_short_auth_rejected(self):
+        for credentials in [("admin", ""), ("", "1234"), ("admin", "123"), ("admin", "   ")]:
+            with self.subTest(auth=credentials), self.assertRaises(ValueError):
+                gr._normalize_auth(credentials)
+
 if __name__ == "__main__":
     unittest.main()

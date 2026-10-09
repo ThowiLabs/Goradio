@@ -32,7 +32,7 @@ func main(){
  exists,err:=app.UserExists(ctx,"admin");if err!=nil{log.Fatal(err)}
  if !exists{
   pwd:=os.Getenv("GORADIO_ADMIN_PASSWORD")
-  if pwd==""{log.Fatal("Define GORADIO_ADMIN_PASSWORD (12+ caracteres) en el primer inicio")}
+  if pwd==""{log.Fatal("Define GORADIO_ADMIN_PASSWORD (4+ caracteres) en el primer inicio")}
   if err:=app.CreateUser(ctx,"admin",pwd,"admin");err!=nil{log.Fatal(err)}
  }
  if err:=app.Serve(ctx,"127.0.0.1",7917,nil);err!=nil{log.Fatal(err)}
