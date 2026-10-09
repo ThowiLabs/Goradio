@@ -14,7 +14,8 @@ The project embeds the compiled **Gradio 6.30.0 frontend** and implements a comp
 - **Python integration** — Define interfaces with familiar `Interface(fn, inputs, outputs)` semantics.
 - **Gradio frontend** — Reuses bundled Gradio 6.30.0 UI assets rather than imitating the interface.
 - **Multipage navigation** — Collapsible sidebar inspired by SB Admin, with the original Gradio interface and theme unchanged; independent routes and callbacks, shared login and optional per-page saved state. The sidebar inherits Gradio's theme and light/dark mode; the developer configures its primary and secondary colors in Go or Python, without exposing an editor to visitors.
-- **Interactive components** — Text, numbers, sliders, checkboxes, dropdowns, JSON, images, audio, video, and files.
+- **Interactive components** — Text, numbers, sliders, checkboxes, dropdowns, JSON, images, audio, video, files, Dataframe, Plot, Gallery and Chatbot (experimental).
+- **Reactive events and streaming** — Native `input`, `change`, page `load`, periodic Timer, SSE v3 streaming, output-property updates, sequential callbacks and bounded per-session state.
 - **Native public sharing** — Generate `*.gradio.live` links using a Go implementation of the tunnel protocol; no separate `frpc` executable is required.
 - **Authentication and persistence** — Optional SQLite accounts, sessions, and saved form inputs and outputs.
 - **Alternative tunnels** — Integrates with Cloudflare Tunnel, localhost.run, Pinggy, and Localtunnel when their corresponding tools are available.
@@ -151,6 +152,10 @@ For Go configuration, state isolation, routing and authentication, see the [dash
 | Audio | `gr.Audio()` | Local uploaded file path |
 | Video | `gr.Video()` | Local uploaded file path |
 | File | `gr.File()` | Local uploaded file path |
+| Dataframe | `gr.Dataframe()` | Table data with headers and rows |
+| Plot | `gr.Plot()` | Plotly JSON-compatible value |
+| Gallery | `gr.Gallery()` | Registered local image paths |
+| Chatbot | `gr.Chatbot()` | Chat message history |
 
 For multimedia outputs, use `gr.media(path)` to register a **trusted** local file. Never pass an arbitrary user-provided path to `media()`.
 
@@ -209,7 +214,7 @@ The compiled frontend is bundled under `third_party/gradio/`, with provenance an
 
 ## Compatibility and limitations
 
-Goradio implements a **subset** of Gradio's server protocol. It does not claim drop-in compatibility with all Gradio applications, including arbitrary `Blocks` layouts, full queue semantics, streaming, complex events, or every component configuration.
+Goradio implements a **subset** of Gradio's server protocol. It does not claim drop-in compatibility with all Gradio applications, including arbitrary `Blocks` layouts, full upstream queue semantics, complex dependency graphs, or every component configuration. The supported event triggers and progressive streaming are documented separately.
 
 The framework has not undergone a production security audit. Before production deployment, configure authentication, persistent storage, HTTPS, sensible resource limits, and monitoring. Public sharing endpoints are intended primarily for development and demonstrations.
 
@@ -217,7 +222,8 @@ The framework has not undergone a production security audit. Before production d
 
 - [Security, authentication, and state persistence](docs/SECURITY_AND_PERSISTENCE.md)
 - [Native Gradio Live sharing](docs/GRADIO_NATIVE.md)
-- [Multipage dashboard](docs/DASHBOARD.md)
+- [Multipage navigation](docs/DASHBOARD.md)
+- [Reactive events, streaming, tables and state](docs/REACTIVE.md)
 - [Examples and showcase](examples/SHOWCASE.md)
 - [Release history](CHANGELOG.md)
 

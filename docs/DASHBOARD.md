@@ -24,7 +24,7 @@ dashboard.route("Tools", "/tools", tools, icon="file", group="General")
 dashboard.launch(server_port=7860, share=False)
 ```
 
-The Python API is **Dashboard.route(title, path, app, *, icon="file", group="")**. Each app must be a separate Interface instance. Routes must be unique, single-segment, lowercase URL paths, for example /tools or /images.
+The Python API is **Dashboard.route(title, path, app, *, icon="file", group="")**. Each app must be a separate Interface instance. Each route may enable its own `live`, `load`, `every` and generator callbacks. Routes must be unique, single-segment, lowercase URL paths, for example /tools or /images.
 
 Run the multimedia example with **python examples/dashboard_demo.py**. Image conversion in this example requires Pillow.
 
@@ -127,7 +127,7 @@ All pages share the same SQLite user accounts, login sessions and cookie. Each p
 
 Browser pages use /, /tools and other defined paths. The native Gradio frontend sends the X-Goradio-Page header for fetch requests, while EventSource and media loads use a same-origin Referer. Relative endpoints such as /tools/gradio_api/run/predict and /tools/static/fonts/... are normalized to their page.
 
-External API clients may send X-Goradio-Page: /tools on requests to shared root endpoints. Arbitrary Blocks layouts, streaming and full upstream queue support are not yet implemented.
+External API clients may send X-Goradio-Page: /tools on requests to shared root endpoints. Arbitrary Blocks layouts and the full upstream queue semantics are still not implemented. Native per-page streaming, Timer and live events are supported; see [Reactivity](REACTIVE.md).
 
 ## Public sharing
 

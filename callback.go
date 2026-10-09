@@ -55,6 +55,7 @@ func PythonHandler(endpoint, token string) Handler {
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
+		if session:=sessionFromContext(ctx);session!="" {req.Header.Set("X-Goradio-Session",session)}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {

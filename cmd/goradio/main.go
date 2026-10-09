@@ -67,14 +67,18 @@ func main() {
 	}
 	var pages struct {
 		Pages []struct {
-			Path        string              `json:"path"`
-			Title       string              `json:"title"`
-			Icon        string              `json:"icon"`
-			Group       string              `json:"group"`
-			Mode        string              `json:"mode"`
-			Description string              `json:"description"`
-			Inputs      []goradio.Component `json:"inputs"`
-			Outputs     []goradio.Component `json:"outputs"`
+			Path         string              `json:"path"`
+			Title        string              `json:"title"`
+			Icon         string              `json:"icon"`
+			Group        string              `json:"group"`
+			Mode         string              `json:"mode"`
+			Description  string              `json:"description"`
+			Inputs       []goradio.Component `json:"inputs"`
+			Outputs      []goradio.Component `json:"outputs"`
+			Live         bool                `json:"live"`
+			Load         bool                `json:"load"`
+			EverySeconds float64             `json:"every_seconds"`
+			Streaming    bool                `json:"streaming"`
 		} `json:"pages"`
 	}
 	if err = json.Unmarshal(raw, &pages); err != nil {
@@ -87,19 +91,24 @@ func main() {
 		}
 		for _, page := range pages.Pages {
 			pageHandler := goradio.BuiltinHandler(page.Mode)
+			var pageStream goradio.StreamHandler
 			if *callback != "" {
 				slug := strings.Trim(page.Path, "/")
 				if slug == "" {
 					slug = "home"
 				}
-				pageHandler = goradio.PythonHandler(strings.TrimSuffix(*callback, "/")+"/"+slug, os.Getenv("GORADIO_CALLBACK_TOKEN"))
+				pageURL := strings.TrimSuffix(*callback, "/") + "/" + slug
+				pageHandler = goradio.PythonHandler(pageURL, os.Getenv("GORADIO_CALLBACK_TOKEN"))
+				if page.Streaming {
+					pageStream = goradio.PythonStreamHandler(pageURL, os.Getenv("GORADIO_CALLBACK_TOKEN"))
+				}
 			}
 			pageCfg := goradio.Config{
-				Title: page.Title, Description: page.Description, Inputs: page.Inputs, Outputs: page.Outputs, Theme: cfg.Theme,
+				Title: page.Title, Description: page.Description, Inputs: page.Inputs, Outputs: page.Outputs, Theme: cfg.Theme, Live: page.Live, Load: page.Load, EverySeconds: page.EverySeconds, Streaming: page.Streaming,
 			}
 			if err := dashboard.Add(goradio.Window{
 				Path: page.Path, Title: page.Title, Icon: page.Icon, Group: page.Group,
-				Config: pageCfg, Handler: pageHandler,
+				Config: pageCfg, Handler: pageHandler, Stream: pageStream,
 			}); err != nil {
 				log.Fatal(err)
 			}
@@ -112,6 +121,9 @@ func main() {
 		single, createErr := goradio.New(cfg, handler, *media)
 		if createErr != nil {
 			log.Fatal(createErr)
+		}
+		if cfg.Streaming && *callback != "" {
+			single.SetStreamHandler(goradio.PythonStreamHandler(*callback, os.Getenv("GORADIO_CALLBACK_TOKEN")))
 		}
 		app = single
 	}

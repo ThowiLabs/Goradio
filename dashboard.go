@@ -21,12 +21,13 @@ import (
 )
 
 type Window struct {
-	Path    string  `json:"path"`
-	Title   string  `json:"title"`
-	Icon    string  `json:"icon,omitempty"`
-	Group   string  `json:"group,omitempty"`
-	Config  Config  `json:"config"`
-	Handler Handler `json:"-"`
+	Path    string        `json:"path"`
+	Title   string        `json:"title"`
+	Icon    string        `json:"icon,omitempty"`
+	Group   string        `json:"group,omitempty"`
+	Config  Config        `json:"config"`
+	Handler Handler       `json:"-"`
+	Stream  StreamHandler `json:"-"`
 }
 type Dashboard struct {
 	Title   string
@@ -103,6 +104,7 @@ func (d *Dashboard) Add(window Window) error {
 		return err
 	}
 	app.tunnels = d.tunnels
+	app.Stream = window.Stream
 	if d.root == nil {
 		d.root = app
 	}

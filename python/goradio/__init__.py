@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import base64
+import contextvars
+import re
 import hmac
+import inspect
 import hashlib
 import json
 import os
@@ -22,12 +25,59 @@ from urllib.request import Request, urlopen
 
 __all__ = [
     "Interface", "Dashboard", "Component", "Textbox", "Number", "Slider", "Checkbox",
-    "Dropdown", "Image", "Audio", "Video", "File", "JSON", "Theme", "media",
+    "Dropdown", "Image", "Audio", "Video", "File", "JSON", "Theme", "Markdown", "Dataframe", "Chatbot", "Plot", "Gallery", "update", "state_get", "state_set", "media",
 ]
+
+_ACTIVE_SESSION: contextvars.ContextVar = contextvars.ContextVar("goradio_active_session", default=None)
+_SESSION_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+
+
+def state_get(key: str, default: Any = None) -> Any:
+    """Retrieve a JSON-serializable item scoped to the current browser session."""
+    current = _ACTIVE_SESSION.get()
+    if current is None:
+        raise RuntimeError("state_get requiere una llamada activa de Gradio")
+    app, session = current
+    if not key or len(key) > 128:
+        raise ValueError("Clave de estado inválida")
+    with app._session_lock:
+        entry = app._session_state.get(session)
+        if entry is None or time.monotonic() - entry["updated"] > 1800:
+            return default
+        raw = entry["items"].get(key)
+    return json.loads(raw) if raw is not None else default
+
+
+def state_set(key: str, value: Any) -> None:
+    """Store a value for the current session (64 KiB/item, 30-minute TTL)."""
+    current = _ACTIVE_SESSION.get()
+    if current is None:
+        raise RuntimeError("state_set requiere una llamada activa de Gradio")
+    app, session = current
+    if not key or len(key) > 128:
+        raise ValueError("Clave de estado inválida")
+    raw = json.dumps(value, ensure_ascii=False)
+    if len(raw.encode("utf-8")) > 65536:
+        raise ValueError("Estado excede 64 KiB")
+    now = time.monotonic()
+    with app._session_lock:
+        for name, entry in list(app._session_state.items()):
+            if now - entry["updated"] > 1800:
+                del app._session_state[name]
+        if session not in app._session_state:
+            if len(app._session_state) >= 1024:
+                raise RuntimeError("Demasiadas sesiones")
+            app._session_state[session] = {"updated": now, "items": {}}
+        entry = app._session_state[session]
+        if key not in entry["items"] and len(entry["items"]) >= 64:
+            raise ValueError("Demasiadas claves de estado")
+        entry["items"][key] = raw
+        entry["updated"] = now
+
 
 _MEDIA_ROOT: Path | None = None
 _TYPES = {"textbox", "number", "slider", "checkbox", "dropdown",
-          "image", "audio", "video", "file", "json"}
+          "image", "audio", "video", "file", "json", "markdown", "dataframe", "chatbot", "plot", "gallery"}
 
 
 @dataclass
@@ -59,12 +109,29 @@ class Component:
     step: float | None = None
     value: Any = None
     choices: list[str] = field(default_factory=list)
+    pattern: str = ""
+    min_length: int | None = None
+    max_length: int | None = None
+    headers: list[str] = field(default_factory=list)
+    datatype: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.type not in _TYPES:
             raise ValueError(f"Componente desconocido: {self.type}")
         if self.min is not None and self.max is not None and self.min > self.max:
             raise ValueError("min no puede superar max")
+        if (self.min_length is not None and self.min_length < 0 or
+            self.max_length is not None and self.max_length < 0 or
+            self.min_length is not None and self.max_length is not None and self.min_length > self.max_length):
+            raise ValueError("Longitud de texto inválida")
+        if self.pattern:
+            import re
+            if len(self.pattern) > 256:
+                raise ValueError("Patrón demasiado largo")
+            try:
+                re.compile(self.pattern)
+            except re.error as exc:
+                raise ValueError("Patrón inválido") from exc
 
     def config(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -83,6 +150,27 @@ def Audio(label="Audio", **kwargs): return Component("audio", label, **kwargs)
 def Video(label="Video", **kwargs): return Component("video", label, **kwargs)
 def File(label="Archivo", **kwargs): return Component("file", label, **kwargs)
 def JSON(label="JSON", **kwargs): return Component("json", label, **kwargs)
+def Markdown(value=None, label="Markdown", **kwargs): return Component("markdown", label, value=value, **kwargs)
+def Dataframe(value=None, label="Tabla", headers=None, datatype=None, **kwargs):
+    return Component("dataframe",label,value=value,headers=list(headers or []),datatype=list(datatype or []),**kwargs)
+def Chatbot(value=None, label="Conversación", **kwargs): return Component("chatbot", label, value=value, **kwargs)
+def Plot(value=None, label="Gráfico", **kwargs): return Component("plot", label, value=value, **kwargs)
+def Gallery(value=None, label="Galería", **kwargs): return Component("gallery", label, value=value, **kwargs)
+
+
+_UNSET = object()
+
+def update(value: Any = _UNSET, *, visible: bool | None = None,
+           interactive: bool | None = None) -> dict:
+    """Actualiza propiedades de un componente, como gr.update()."""
+    patch = {"__type__": "update"}
+    if value is not _UNSET:
+        patch["value"] = value
+    if visible is not None:
+        patch["visible"] = bool(visible)
+    if interactive is not None:
+        patch["interactive"] = bool(interactive)
+    return patch
 
 
 def media(path: str | Path) -> str:
@@ -135,7 +223,9 @@ def _normalize_auth(auth):
 
 class Interface:
     def __init__(self, fn: Callable, inputs: Any, outputs: Any,
-                 title: str = "Goradio", description: str = "", theme: Theme | None = None) -> None:
+                 title: str = "Goradio", description: str = "", theme: Theme | None = None,
+                 live: bool = False, every: float = 0.0, load: bool = False,
+                 validate: Callable | None = None) -> None:
         if not callable(fn):
             raise TypeError("fn debe ser invocable")
         self.fn = fn
@@ -148,12 +238,34 @@ class Interface:
         if theme is not None and not isinstance(theme, Theme):
             raise TypeError("theme debe ser gr.Theme o None")
         self.theme = theme
+        import math
+        if every != 0 and (not math.isfinite(every) or not .25 <= every <= 3600):
+            raise ValueError("every debe estar entre 0.25 y 3600 segundos")
+        self.live = bool(live)
+        self.load = bool(load)
+        self.every = float(every)
+        if validate is not None and not callable(validate):
+            raise TypeError("validate debe ser una función")
+        self.validator = validate
+        self._chains: list[Callable] = []
+        self.streaming = inspect.isgeneratorfunction(fn)
+        self._session_lock = threading.Lock()
+        self._session_state: dict = {}
         self._process: subprocess.Popen | None = None
         self._server: ThreadingHTTPServer | None = None
         self._temporary: tempfile.TemporaryDirectory | None = None
         self.local_url: str | None = None
         self._dashboard_pages: dict | None = None
         self._dashboard_definitions: list[dict] = []
+
+    def then(self, fn: Callable) -> "Interface":
+        """Ejecuta un callback tras el anterior, usando sus salidas como entradas."""
+        if not callable(fn):
+            raise TypeError("then requiere una función")
+        if len(self._chains) >= 16:
+            raise ValueError("Máximo 16 funciones encadenadas")
+        self._chains.append(fn)
+        return self
 
     def launch(self, share: bool | list[str] | tuple[str, ...] = False,
                server_name: str = "127.0.0.1", server_port: int = 7860,
@@ -203,7 +315,13 @@ class Interface:
 
         class Callback(BaseHTTPRequestHandler):
             def do_POST(self):
-                if not (self.path == "/callback" or (owner._dashboard_pages is not None and self.path.startswith("/callback/"))) or not hmac.compare_digest(
+                streaming = self.path.endswith("/stream")
+                base_path = self.path[:-7] if streaming else self.path
+                valid_path = base_path == "/callback" or (
+                    owner._dashboard_pages is not None
+                    and base_path.startswith("/callback/")
+                )
+                if not valid_path or not hmac.compare_digest(
                     self.headers.get("Authorization", ""), "Bearer " + token
                 ):
                     self.send_error(403)
@@ -216,25 +334,82 @@ class Interface:
                     data = request["data"]
                     target = owner
                     if owner._dashboard_pages is not None:
-                        slug = self.path.removeprefix("/callback/")
+                        slug = base_path.removeprefix("/callback/")
                         target = owner._dashboard_pages.get(slug)
                         if target is None:
                             raise ValueError("Página desconocida")
                     if not isinstance(data, list) or len(data) != len(target.inputs):
                         raise ValueError("Entradas incorrectas")
-                    result = target.fn(*data)
-                    values = list(result) if len(target.outputs) > 1 and isinstance(result, (tuple, list)) else [result]
-                    if len(values) != len(target.outputs):
-                        raise ValueError("Número incorrecto de salidas")
-                    payload = {"data": values}
+                    session = self.headers.get("X-Goradio-Session", "")
+                    if session and not _SESSION_PATTERN.fullmatch(session):
+                        raise ValueError("Identificador de sesión inválido")
+                    token_ctx = _ACTIVE_SESSION.set((target, session) if session else None)
+                    try:
+                        self._execute_callback(target, data, streaming)
+                    finally:
+                        _ACTIVE_SESSION.reset(token_ctx)
+                    return
                 except Exception as exc:
-                    payload = {"error": f"{type(exc).__name__}: {exc}"}
-                encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                    encoded = json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Content-Length", str(len(encoded)))
+                    self.end_headers()
+                    self.wfile.write(encoded)
+
+            def _execute_callback(self, target, data, streaming):
+                if target.validator is not None:
+                    target.validator(*data)
+                if streaming:
+                    if not target.streaming:
+                        raise ValueError("Función no es generadora")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    try:
+                        last_values = None
+                        for result in target.fn(*data):
+                            values = list(result) if len(target.outputs) > 1 and isinstance(result, (tuple, list)) else [result]
+                            if len(values) != len(target.outputs):
+                                raise ValueError("Número incorrecto de salidas")
+                            line = json.dumps({"data": values}, ensure_ascii=False).encode("utf-8") + b"\n"
+                            if len(line) > 1048576:
+                                raise ValueError("Respuesta de streaming demasiado grande")
+                            self.wfile.write(line)
+                            self.wfile.flush()
+                            last_values = values
+                        if last_values is None:
+                            raise ValueError("Generador no produjo resultados")
+                        for callback in target._chains:
+                            next_result = callback(*last_values)
+                            last_values = list(next_result) if len(target.outputs) > 1 and isinstance(next_result, (tuple, list)) else [next_result]
+                            if len(last_values) != len(target.outputs):
+                                raise ValueError("Función encadenada devolvió salidas incorrectas")
+                            self.wfile.write(json.dumps({"data": last_values}, ensure_ascii=False).encode("utf-8") + b"\n")
+                            self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+                    except Exception:
+                        self.wfile.write(json.dumps({"error": "Función generadora falló"}).encode("utf-8") + b"\n")
+                        self.wfile.flush()
+                    return
+                result = target.fn(*data)
+                values = list(result) if len(target.outputs) > 1 and isinstance(result, (tuple, list)) else [result]
+                if len(values) != len(target.outputs):
+                    raise ValueError("Número incorrecto de salidas")
+                for callback in target._chains:
+                    next_result = callback(*values)
+                    values = list(next_result) if len(target.outputs) > 1 and isinstance(next_result, (tuple, list)) else [next_result]
+                    if len(values) != len(target.outputs):
+                        raise ValueError("Función encadenada devolvió salidas incorrectas")
+                payload = json.dumps({"data": values}, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(encoded)))
+                self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
-                self.wfile.write(encoded)
+                self.wfile.write(payload)
 
             def log_message(self, format, *args):
                 pass
@@ -250,6 +425,8 @@ class Interface:
             threading.Thread(target=self._server.serve_forever, daemon=True).start()
             cfg = {"title": self.title, "description": self.description,
                    "theme": asdict(self.theme) if self.theme is not None else None,
+                   "live": self.live, "load": self.load, "every_seconds": self.every,
+                   "streaming": self.streaming,
                    "inputs": [c.config() for c in self.inputs],
                    "outputs": [c.config() for c in self.outputs]}
             if self._dashboard_pages is not None:
@@ -259,6 +436,8 @@ class Interface:
                     {"title": page_data["title"], "path": page_data["path"],
                      "icon": page_data["icon"], "group": page_data["group"],
                      "description": page_data["app"].description,
+                     "live": page_data["app"].live, "load": page_data["app"].load, "every_seconds": page_data["app"].every,
+                     "streaming": page_data["app"].streaming,
                      "inputs": [c.config() for c in page_data["app"].inputs],
                      "outputs": [c.config() for c in page_data["app"].outputs]}
                     for page_data in self._dashboard_definitions

@@ -32,6 +32,11 @@ type Component struct {
 	Step        *float64 `json:"step,omitempty"`
 	Value       any      `json:"value,omitempty"`
 	Choices     []string `json:"choices,omitempty"`
+	Pattern     string   `json:"pattern,omitempty"`
+	MinLength   *int     `json:"min_length,omitempty"`
+	MaxLength   *int     `json:"max_length,omitempty"`
+	Headers     []string `json:"headers,omitempty"`
+	Datatype    []string `json:"datatype,omitempty"`
 }
 type Theme struct {
 	PrimaryColor   string `json:"primary_color,omitempty"`
@@ -39,16 +44,27 @@ type Theme struct {
 }
 
 type Config struct {
-	Theme       *Theme      `json:"theme,omitempty"`
-	Title       string      `json:"title"`
-	Description string      `json:"description,omitempty"`
-	Inputs      []Component `json:"inputs"`
-	Outputs     []Component `json:"outputs"`
+	Theme        *Theme      `json:"theme,omitempty"`
+	Title        string      `json:"title"`
+	Description  string      `json:"description,omitempty"`
+	Inputs       []Component `json:"inputs"`
+	Outputs      []Component `json:"outputs"`
+	Live         bool        `json:"live,omitempty"`
+	Load         bool        `json:"load,omitempty"`
+	Streaming    bool        `json:"streaming,omitempty"`
+	EverySeconds float64     `json:"every_seconds,omitempty"`
 }
 type Handler func(context.Context, []any) ([]any, error)
+
+// StreamHandler sends successive complete output snapshots. Call emit until
+// the operation finishes or the context is canceled.
+type StreamHandler func(context.Context, []any, func([]any) error) error
 type App struct {
 	Config         Config
 	Handler        Handler
+	Stream         StreamHandler
+	Validator      func(context.Context, []any) error
+	pipeline       []Handler
 	MediaDir       string
 	MaxUploadBytes int64
 	tunnels        *TunnelManager
@@ -58,9 +74,11 @@ type App struct {
 	uploads        map[string]*uploadState
 	security       *securityBackend
 	stateMu        sync.Mutex
+	sessionMu      sync.Mutex
+	sessions       map[string]*sessionBucket
 }
 
-var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "image": true, "audio": true, "video": true, "file": true, "json": true}
+var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "image": true, "audio": true, "video": true, "file": true, "json": true, "markdown": true, "dataframe": true, "chatbot": true, "plot": true, "gallery": true}
 var fileID = regexp.MustCompile(`^[a-f0-9]{32}(\.[a-z0-9]{1,10})?$`)
 
 func New(config Config, handler Handler, mediaDir string) (*App, error) {
@@ -69,6 +87,9 @@ func New(config Config, handler Handler, mediaDir string) (*App, error) {
 	}
 	if err := validateTheme(config.Theme); err != nil {
 		return nil, err
+	}
+	if config.EverySeconds != 0 && (config.EverySeconds < .25 || config.EverySeconds > 3600 || math.IsNaN(config.EverySeconds) || math.IsInf(config.EverySeconds, 0)) {
+		return nil, errors.New("every_seconds debe estar entre 0.25 y 3600")
 	}
 	if len(config.Outputs) == 0 {
 		return nil, errors.New("se requiere una salida")
@@ -83,6 +104,20 @@ func New(config Config, handler Handler, mediaDir string) (*App, error) {
 		if c.Min != nil && c.Max != nil && *c.Min > *c.Max {
 			return nil, errors.New("min mayor a max")
 		}
+		if c.MinLength != nil && *c.MinLength < 0 || c.MaxLength != nil && *c.MaxLength < 0 || c.MinLength != nil && c.MaxLength != nil && *c.MinLength > *c.MaxLength {
+			return nil, errors.New("longitud de texto inválida")
+		}
+		if c.Pattern != "" {
+			if len(c.Pattern) > 256 {
+				return nil, errors.New("patrón demasiado largo")
+			}
+			if _, err := regexp.Compile(c.Pattern); err != nil {
+				return nil, fmt.Errorf("patrón inválido: %w", err)
+			}
+		}
+		if len(c.Headers) > 64 || len(c.Datatype) > 64 {
+			return nil, errors.New("demasiadas columnas")
+		}
 	}
 	if mediaDir == "" {
 		mediaDir = filepath.Join(os.TempDir(), "goradio-media")
@@ -93,7 +128,52 @@ func New(config Config, handler Handler, mediaDir string) (*App, error) {
 	if config.Title == "" {
 		config.Title = "Goradio"
 	}
-	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager(), jobs: map[string]*gradioJob{}, uploads: map[string]*uploadState{}}, nil
+	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager(), jobs: map[string]*gradioJob{}, uploads: map[string]*uploadState{}, sessions: map[string]*sessionBucket{}}, nil
+}
+
+// SetStreamHandler enables progressive results over Gradio's SSE protocol.
+// Configure it before serving HTTP requests.
+func (a *App) SetStreamHandler(stream StreamHandler) { a.Stream = stream }
+
+// SetValidator rejects invalid combinations of input fields before invoking
+// application functions. Configure it before starting the server.
+func (a *App) SetValidator(validate func(context.Context, []any) error) { a.Validator = validate }
+
+// Then chains a second handler after the previous handler has produced all its
+// outputs. Each stage receives the previous complete output list as inputs.
+// It uses the existing Gradio components; no alternative frontend is added.
+func (a *App) Then(next Handler) error {
+	if next == nil {
+		return errors.New("then requiere una función")
+	}
+	if len(a.pipeline) >= 16 {
+		return errors.New("máximo 16 eventos encadenados")
+	}
+	a.pipeline = append(a.pipeline, next)
+	return nil
+}
+
+func (a *App) runThen(ctx context.Context, values []any, afterEach func([]any) error) ([]any, error) {
+	current := values
+	for _, handler := range a.pipeline {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		next, err := handler(ctx, current)
+		if err != nil {
+			return nil, err
+		}
+		if len(next) != len(a.Config.Outputs) {
+			return nil, failPrediction(500, "SALIDAS", "Etapa de cadena devolvió salidas incorrectas")
+		}
+		current = next
+		if afterEach != nil {
+			if err := afterEach(current); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return current, nil
 }
 
 func (a *App) Routes() http.Handler {
@@ -124,6 +204,9 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /gradio_api/run/clear", a.gradioReset)
 	mux.HandleFunc("POST /gradio_api/api/predict", a.gradioPredict)
 	mux.HandleFunc("POST /gradio_api/call/predict", a.gradioCall)
+	mux.HandleFunc("POST /gradio_api/queue/join", a.gradioQueueJoin)
+	mux.HandleFunc("GET /gradio_api/queue/data", a.gradioQueueData)
+	mux.HandleFunc("POST /gradio_api/queue/cancel", a.gradioQueueCancel)
 	mux.HandleFunc("GET /gradio_api/call/predict/{id}", a.gradioEvent)
 	mux.HandleFunc("POST /gradio_api/upload", a.gradioUpload)
 	mux.HandleFunc("GET /gradio_api/upload_progress", a.gradioUploadProgress)
@@ -257,7 +340,16 @@ func (a *App) predictValues(ctx context.Context, data []any) ([]any, error) {
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+	if a.Validator != nil {
+		if err := a.Validator(timeoutCtx, values); err != nil {
+			return nil, failPrediction(400, "VALIDACION", err.Error())
+		}
+	}
 	results, err := a.Handler(timeoutCtx, values)
+	if err != nil {
+		return nil, err
+	}
+	results, err = a.runThen(timeoutCtx, results, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -306,10 +398,59 @@ func (a *App) validate(c Component, v any) (any, error) {
 	}
 	switch c.Type {
 	case "textbox":
-		if _, ok := v.(string); !ok {
+		txt, ok := v.(string)
+		if !ok {
 			return nil, errors.New("debe ser texto")
 		}
+		n := len([]rune(txt))
+		if c.MinLength != nil && n < *c.MinLength {
+			return nil, fmt.Errorf("mínimo %d caracteres", *c.MinLength)
+		}
+		if c.MaxLength != nil && n > *c.MaxLength {
+			return nil, fmt.Errorf("máximo %d caracteres", *c.MaxLength)
+		}
+		if c.Pattern != "" && !regexp.MustCompile(c.Pattern).MatchString(txt) {
+			return nil, errors.New("formato inválido")
+		}
 	case "json":
+		return v, nil
+	case "dataframe":
+		frame, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.New("se requiere tabla con headers y data")
+		}
+		rows, ok := frame["data"].([]any)
+		if !ok {
+			return nil, errors.New("filas inválidas")
+		}
+		if len(rows) > 10000 {
+			return nil, errors.New("máximo 10000 filas")
+		}
+		if len(c.Headers) > 0 {
+			headers, ok := frame["headers"].([]any)
+			if !ok || len(headers) != len(c.Headers) {
+				return nil, errors.New("columnas inválidas")
+			}
+			for i, h := range headers {
+				if h != c.Headers[i] {
+					return nil, errors.New("nombres de columnas inválidos")
+				}
+			}
+		}
+		for _, row := range rows {
+			cells, ok := row.([]any)
+			if !ok || len(cells) > 64 || len(c.Headers) > 0 && len(cells) != len(c.Headers) {
+				return nil, errors.New("fila inválida")
+			}
+			for i, x := range cells {
+				if i < len(c.Datatype) && c.Datatype[i] == "number" && x != nil {
+					v, ok := x.(float64)
+					if !ok || math.IsNaN(v) || math.IsInf(v, 0) {
+						return nil, errors.New("celda numérica inválida")
+					}
+				}
+			}
+		}
 		return v, nil
 	case "number", "slider":
 		n, ok := v.(float64)

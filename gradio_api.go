@@ -21,11 +21,13 @@ import (
 
 type gradioJob struct {
 	created  time.Time
+	session  string
 	finished chan struct{}
 	cancel   context.CancelFunc
 	mu       sync.Mutex
 	data     []any
 	err      error
+	progress chan []any
 }
 
 func (j *gradioJob) complete(data []any, err error) {
@@ -38,10 +40,36 @@ func (j *gradioJob) complete(data []any, err error) {
 func (j *gradioJob) result() ([]any, error) { j.mu.Lock(); defer j.mu.Unlock(); return j.data, j.err }
 
 type gradioRequest struct {
-	Data    []any `json:"data"`
-	FnIndex *int  `json:"fn_index,omitempty"`
+	Data        []any  `json:"data"`
+	FnIndex     *int   `json:"fn_index,omitempty"`
+	SessionHash string `json:"session_hash,omitempty"`
 }
 
+// classifyFn maps native frontend dependency indices to handler operations.
+// Indices 0 and 1 remain Submit and Clear for backwards compatibility.
+func (a *App) classifyFn(index int) (autosave bool, inputIndex int, valid bool) {
+	if index == 0 || index == 1 {
+		return false, 0, true
+	}
+	reactiveCount := 0
+	if a.Config.Load {
+		reactiveCount++
+	}
+	if a.Config.Live {
+		reactiveCount += 2 * len(a.Config.Inputs)
+	}
+	if a.Config.EverySeconds > 0 {
+		reactiveCount++
+	}
+	if index >= 2 && index < 2+reactiveCount {
+		return false, 0, true
+	}
+	base := 2 + reactiveCount
+	if a.security != nil && a.security.cfg.PersistInputs && index >= base && index < base+2*len(a.Config.Inputs) {
+		return true, (index - base) / 2, true
+	}
+	return false, 0, false
+}
 func (a *App) gradioPredict(w http.ResponseWriter, r *http.Request) {
 	raw, fnIndex, err := a.parseGradioRequest(w, r)
 	if err != nil {
@@ -57,11 +85,11 @@ func (a *App) gradioPredict(w http.ResponseWriter, r *http.Request) {
 		a.gradioReset(w, r)
 		return
 	}
-	if fnIndex >= 2 {
-		a.persistHandler(w, r, (fnIndex-2)/2, raw[0])
+	if saved, idx, _ := a.classifyFn(fnIndex); saved {
+		a.persistHandler(w, r, idx, raw[0])
 		return
 	}
-	data, err := a.executeGradio(r.Context(), raw)
+	data, err := a.executeGradio(withGradioSession(r.Context(), r.Header.Get("X-Goradio-Session")), raw)
 	if err != nil {
 		writePredictionError(w, err)
 		return
@@ -79,17 +107,28 @@ func (a *App) parseGradioRequest(w http.ResponseWriter, r *http.Request) ([]any,
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, 0, failPrediction(400, "JSON_INVALIDO", "Solicitud inválida")
 	}
+	fnIndex := 0
 	if req.FnIndex != nil {
-		if *req.FnIndex == 1 {
-			return nil, 1, nil
+		fnIndex = *req.FnIndex
+	}
+	if req.SessionHash != "" {
+		if !gradioSessionHash.MatchString(req.SessionHash) {
+			return nil, 0, failPrediction(400, "SESION", "Identificador de sesión inválido")
 		}
-		if *req.FnIndex >= 2 && a.security != nil && a.security.cfg.PersistInputs &&
-			(*req.FnIndex-2)/2 < len(a.Config.Inputs) && len(req.Data) == 1 {
-			return req.Data, *req.FnIndex, nil
+		r.Header.Set("X-Goradio-Session", req.SessionHash)
+	}
+	saved, _, valid := a.classifyFn(fnIndex)
+	if !valid {
+		return nil, 0, failPrediction(404, "EVENTO", "Evento desconocido")
+	}
+	if fnIndex == 1 {
+		return nil, 1, nil
+	}
+	if saved {
+		if len(req.Data) != 1 {
+			return nil, 0, failPrediction(400, "ENTRADAS", "Guardado requiere una entrada")
 		}
-		if *req.FnIndex != 0 {
-			return nil, 0, failPrediction(404, "EVENTO", "Evento desconocido")
-		}
+		return req.Data, fnIndex, nil
 	}
 	if len(req.Data) != len(a.Config.Inputs) {
 		return nil, 0, failPrediction(400, "ENTRADAS", "Cantidad incorrecta de entradas")
@@ -136,14 +175,125 @@ func (a *App) parseGradioRequest(w http.ResponseWriter, r *http.Request) ([]any,
 		}
 		data[i] = "/api/media/" + ref
 	}
-	return data, 0, nil
+	return data, fnIndex, nil
 }
+
+// Gradio 6 Chatbot expects content to be an array of typed message parts,
+// even when the handler returns plain text. Preserve metadata and roles.
+func normalizeGradioChatMessages(value any) ([]any, error) {
+	if value == nil {
+		return []any{}, nil
+	}
+	var raw []any
+	switch typed := value.(type) {
+	case []any:
+		raw = typed
+	case []map[string]any:
+		raw = make([]any, len(typed))
+		for i, item := range typed {
+			raw[i] = item
+		}
+	default:
+		return nil, errors.New("Chatbot necesita una lista de mensajes")
+	}
+	if len(raw) > 500 {
+		return nil, errors.New("Chatbot excede el límite de mensajes")
+	}
+	messages := make([]any, 0, len(raw))
+	for _, element := range raw {
+		message, ok := element.(map[string]any)
+		if !ok {
+			return nil, errors.New("Mensaje de Chatbot inválido")
+		}
+		role, ok := message["role"].(string)
+		if !ok || (role != "user" && role != "assistant" && role != "system") {
+			return nil, errors.New("Rol de Chatbot inválido")
+		}
+		copyMessage := make(map[string]any, len(message))
+		for k, v := range message {
+			copyMessage[k] = v
+		}
+		switch content := message["content"].(type) {
+		case string:
+			copyMessage["content"] = []any{map[string]any{"type": "text", "text": content}}
+		case []any:
+			for _, item := range content {
+				part, ok := item.(map[string]any)
+				if !ok || part["type"] == nil {
+					return nil, errors.New("Bloque de Chatbot inválido")
+				}
+			}
+		default:
+			return nil, errors.New("Contenido de Chatbot inválido")
+		}
+		messages = append(messages, copyMessage)
+	}
+	return messages, nil
+}
+
 func (a *App) executeGradio(ctx context.Context, raw []any) ([]any, error) {
 	results, err := a.predictValues(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
+	return a.prepareGradioOutputs(ctx, results)
+}
+
+// prepareGradioOutputs applies the same media, gallery and chatbot conversion
+// to final and intermediate streaming messages.
+func (a *App) prepareGradioOutputs(ctx context.Context, results []any) ([]any, error) {
+	if len(results) != len(a.Config.Outputs) {
+		return nil, failPrediction(500, "SALIDAS", "Número de salidas incorrecto")
+	}
 	for i, c := range a.Config.Outputs {
+		if patch, ok := results[i].(map[string]any); ok && patch["__type__"] == "update" {
+			continue
+		}
+		if c.Type == "chatbot" {
+			messages, err := normalizeGradioChatMessages(results[i])
+			if err != nil {
+				return nil, failPrediction(400, "CHATBOT", err.Error())
+			}
+			results[i] = messages
+			continue
+		}
+		if c.Type == "gallery" && results[i] != nil {
+			items, ok := results[i].([]string)
+			if !ok || len(items) > 40 {
+				return nil, failPrediction(400, "GALERIA", "La galería admite hasta 40 rutas locales registradas")
+			}
+			collection := make([]any, 0, len(items))
+			for _, source := range items {
+				base, err := filepath.Abs(a.MediaDir)
+				if err != nil {
+					return nil, err
+				}
+				path, err := filepath.Abs(filepath.Clean(source))
+				if err != nil {
+					return nil, err
+				}
+				rel, err := filepath.Rel(base, path)
+				if err != nil || rel == "." || strings.HasPrefix(rel, "..") ||
+					strings.Contains(rel, string(filepath.Separator)) || !fileID.MatchString(rel) {
+					return nil, failPrediction(400, "GALERIA", "Archivo fuera del directorio multimedia")
+				}
+				info, err := os.Stat(path)
+				if err != nil || info.IsDir() {
+					return nil, failPrediction(400, "GALERIA", "Imagen de galería no encontrada")
+				}
+				if err = a.recordFile(ctx, rel); err != nil {
+					return nil, err
+				}
+				file := map[string]any{
+					"path": rel, "url": "/gradio_api/file=" + rel,
+					"orig_name": rel, "size": info.Size(), "mime_type": mime.TypeByExtension(filepath.Ext(rel)),
+					"meta": map[string]any{"_type": "gradio.FileData"},
+				}
+				collection = append(collection, map[string]any{"image": file, "caption": nil})
+			}
+			results[i] = collection
+			continue
+		}
 		if !isMedia(c.Type) || results[i] == nil {
 			continue
 		}
@@ -193,8 +343,8 @@ func (a *App) gradioCall(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 500, "INTERNO", "Fallo generando id")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), ctxIdentityKey{}, func() Identity { id, _ := IdentityFromContext(r.Context()); return id }()), 90*time.Second)
-	job := &gradioJob{created: time.Now(), finished: make(chan struct{}), cancel: cancel}
+	ctx, cancel := context.WithTimeout(context.WithValue(withGradioSession(context.Background(), r.Header.Get("X-Goradio-Session")), ctxIdentityKey{}, func() Identity { id, _ := IdentityFromContext(r.Context()); return id }()), 90*time.Second)
+	job := &gradioJob{created: time.Now(), session: r.Header.Get("X-Goradio-Session"), finished: make(chan struct{}), progress: make(chan []any, 16), cancel: cancel}
 	a.jobsMu.Lock()
 	if len(a.jobs) > 100 {
 		for key, item := range a.jobs {
@@ -220,11 +370,80 @@ func (a *App) gradioCall(w http.ResponseWriter, r *http.Request) {
 		if fnIndex == 1 {
 			_ = a.deleteStoredState(ctx, idUser)
 			results = a.resetValues()
-		} else if fnIndex >= 2 {
-			runErr = a.storeInput(ctx, idUser, (fnIndex-2)/2, data[0])
+		} else if saved, idx, _ := a.classifyFn(fnIndex); saved {
+			runErr = a.storeInput(ctx, idUser, idx, data[0])
 			results = []any{}
 		} else {
-			results, runErr = a.executeGradio(ctx, data)
+			if a.Stream != nil {
+				normalized := make([]any, len(data))
+				for i, c := range a.Config.Inputs {
+					normalized[i], runErr = a.validate(c, data[i])
+					if runErr != nil {
+						runErr = failPrediction(400, "VALIDACION", fmt.Sprintf("Entrada %d: %v", i+1, runErr))
+						break
+					}
+				}
+				if runErr == nil && a.Validator != nil {
+					runErr = a.Validator(ctx, normalized)
+				}
+				if runErr == nil {
+					last := []any(nil)
+					lastRaw := []any(nil)
+					runErr = a.Stream(ctx, normalized, func(partial []any) error {
+						lastRaw = partial
+						if err := ctx.Err(); err != nil {
+							return err
+						}
+						prepared, err := a.prepareGradioOutputs(ctx, partial)
+						if err != nil {
+							return err
+						}
+						last = prepared
+						// Bound memory usage even if the browser is slow.
+						select {
+						case job.progress <- prepared:
+						default:
+							select {
+							case <-job.progress:
+							default:
+							}
+							select {
+							case job.progress <- prepared:
+							default:
+							}
+						}
+						return nil
+					})
+					if runErr == nil && last == nil {
+						runErr = errors.New("La función de streaming no produjo ningún resultado")
+					}
+					if runErr == nil {
+						_, runErr = a.runThen(ctx, lastRaw, func(values []any) error {
+							prepared, err := a.prepareGradioOutputs(ctx, values)
+							if err != nil {
+								return err
+							}
+							last = prepared
+							select {
+							case job.progress <- prepared:
+							default:
+								select {
+								case <-job.progress:
+								default:
+								}
+								select {
+								case job.progress <- prepared:
+								default:
+								}
+							}
+							return nil
+						})
+					}
+					results = last
+				}
+			} else {
+				results, runErr = a.executeGradio(ctx, data)
+			}
 			if runErr == nil {
 				_ = a.storeResults(ctx, idUser, data, results)
 			}
@@ -249,27 +468,48 @@ func (a *App) gradioEvent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
-	select {
-	case <-job.finished:
-	case <-r.Context().Done():
+	defer func() { a.jobsMu.Lock(); delete(a.jobs, id); a.jobsMu.Unlock() }()
+	flush, ok := w.(http.Flusher)
+	if !ok {
 		return
 	}
-	data, err := job.result()
-	event := "complete"
-	payload := map[string]any{"data": data}
-	if err != nil {
-		event = "error"
-		payload = map[string]any{"error": "La función produjo un error"}
-		log.Printf("evento Goradio: %v", err)
-	}
-	raw, _ := json.Marshal(payload)
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, raw)
-	if flush, ok := w.(http.Flusher); ok {
+	send := func(event string, payload any) {
+		raw, _ := json.Marshal(payload)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, raw)
 		flush.Flush()
 	}
-	a.jobsMu.Lock()
-	delete(a.jobs, id)
-	a.jobsMu.Unlock()
+	// Stream complete output snapshots; each "generating" SSE frame is a real
+	// update from the Go handler, not an animated placeholder.
+	for {
+		select {
+		case data := <-job.progress:
+			send("generating", map[string]any{"data": data, "is_generating": true})
+		case <-job.finished:
+			// Forward any queued partial updates before the final frame.
+			for {
+				select {
+				case data := <-job.progress:
+					send("generating", map[string]any{"data": data, "is_generating": true})
+				default:
+					goto completed
+				}
+			}
+		completed:
+			data, err := job.result()
+			if err != nil {
+				log.Printf("evento Goradio: %v", err)
+				send("error", map[string]any{"error": "La función produjo un error"})
+			}
+			if err == nil {
+				send("complete", map[string]any{"data": data, "is_generating": false})
+			}
+			return
+		case <-r.Context().Done():
+			// User left the SSE endpoint: terminate the worker promptly.
+			job.cancel()
+			return
+		}
+	}
 }
 
 // uploadState refleja los bytes realmente leídos del multipart, no solo una animación.

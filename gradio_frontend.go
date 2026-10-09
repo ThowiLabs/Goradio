@@ -186,15 +186,21 @@ func (a *App) gradioConfig() map[string]any {
 	submit := id()
 	all = append(all, propsComponent(submit, "button", map[string]any{"value": "Submit", "variant": "primary", "visible": true, "size": "lg", "interactive": true}))
 	leftChildren = append(leftChildren, leaf(submit))
+	var timerID int
+	if a.Config.EverySeconds > 0 {
+		timerID = id()
+		all = append(all, propsComponent(timerID, "timer", map[string]any{"value": a.Config.EverySeconds, "active": true, "render": true}))
+		leftChildren = append(leftChildren, leaf(timerID))
+	}
 	clear := id()
 	all = append(all, propsComponent(clear, "button", map[string]any{"value": "Clear", "variant": "secondary", "visible": true, "size": "sm", "interactive": true}))
 	rightChildren = append(rightChildren, leaf(clear))
 	deps := []any{
 		map[string]any{
 			"id": 0, "targets": []any{[]any{submit, "click"}}, "inputs": inputs, "outputs": outputs, "backend_fn": true,
-			"queue": false, "api_name": "predict", "api_description": nil, "scroll_to_output": true,
+			"queue": a.Stream != nil, "api_name": "predict", "api_description": nil, "scroll_to_output": true,
 			"show_progress": "full", "show_progress_on": nil, "batch": false, "max_batch_size": 4,
-			"cancels": []any{}, "types": map[string]bool{"generator": false, "cancel": false},
+			"cancels": []any{}, "types": map[string]bool{"generator": a.Stream != nil, "cancel": false},
 			"collects_event_data": false, "trigger_after": nil, "trigger_only_on_success": false,
 			"trigger_only_on_failure": false, "trigger_mode": "once", "api_visibility": "public",
 			"rendered_in": nil, "render_id": nil, "connection": "sse", "time_limit": nil,
@@ -208,15 +214,49 @@ func (a *App) gradioConfig() map[string]any {
 			"event_specific_args": nil, "component_prop_inputs": []int{},
 		},
 	}
+	// The original Gradio load event runs once when a page is ready.
+	if a.Config.Load {
+		deps = append(deps, map[string]any{
+			"id": len(deps), "targets": []any{[]any{root, "load"}},
+			"inputs": inputs, "outputs": outputs, "backend_fn": true, "queue": a.Stream != nil,
+			"api_name": nil, "show_progress": "minimal", "scroll_to_output": false,
+			"cancels": []any{}, "types": map[string]bool{"generator": a.Stream != nil, "cancel": false},
+			"trigger_mode": "once", "api_visibility": "private", "connection": "sse",
+			"stream_every": 0.5, "event_specific_args": nil,
+		})
+	}
+	// Native change, input, and timer events run the existing prediction
+	// handler, without replacing Gradio widgets with custom HTML.
+	if a.Config.Live {
+		for _, inputID := range inputs {
+			for _, trigger := range []string{"change", "input"} {
+				deps = append(deps, map[string]any{
+					"id": len(deps), "targets": []any{[]any{inputID, trigger}},
+					"inputs": inputs, "outputs": outputs, "backend_fn": true, "queue": a.Stream != nil,
+					"api_name": nil, "show_progress": "minimal", "scroll_to_output": false,
+					"cancels": []any{}, "types": map[string]bool{"generator": a.Stream != nil, "cancel": false},
+					"trigger_mode": "always_last", "api_visibility": "private", "connection": "sse",
+					"stream_every": 0.5, "event_specific_args": nil,
+				})
+			}
+		}
+	}
+	if timerID > 0 {
+		deps = append(deps, map[string]any{
+			"id": len(deps), "targets": []any{[]any{timerID, "tick"}},
+			"inputs": inputs, "outputs": outputs, "backend_fn": true, "queue": a.Stream != nil,
+			"api_name": nil, "show_progress": "hidden", "scroll_to_output": false,
+			"cancels": []any{}, "types": map[string]bool{"generator": a.Stream != nil, "cancel": false},
+			"trigger_mode": "always_last", "api_visibility": "private", "connection": "sse",
+			"stream_every": 0.5, "event_specific_args": nil,
+		})
+	}
 	// Eventos reactivos nativos Gradio. Cada input se guarda sin pulsar Submit.
 	// input captura escritura y slider en tiempo real; change cubre selects y otros.
 	if a.security != nil && a.security.cfg.PersistInputs {
 		for i, inputID := range inputs {
 			for _, trigger := range []string{"input", "change"} {
-				index := 2 + i*2
-				if trigger == "change" {
-					index++
-				}
+				index := len(deps)
 				deps = append(deps, map[string]any{
 					"id": index, "targets": []any{[]any{inputID, trigger}},
 					"inputs": []int{inputID}, "outputs": []int{},
@@ -241,7 +281,7 @@ func (a *App) gradioConfig() map[string]any {
 		"version": "6.30.0", "api_prefix": "/gradio_api", "mode": "interface", "app_id": "goradio",
 		"dev_mode": false, "vibe_mode": false, "analytics_enabled": false, "components": all,
 		"css": nil, "connect_heartbeat": false, "js": nil, "head": nil, "title": a.Config.Title,
-		"space_id": nil, "enable_queue": false, "show_error": true, "footer_links": []any{},
+		"space_id": nil, "enable_queue": a.Stream != nil, "show_error": true, "footer_links": []any{},
 		"run_history": false, "is_colab": false, "max_file_size": a.MaxUploadBytes,
 		"stylesheets": []any{}, "theme": "default", "protocol": "sse_v3",
 		"body_css":    map[string]string{"body_background_fill": "white", "body_text_color": "#1f2937", "body_background_fill_dark": "#0b0f19", "body_text_color_dark": "#f3f4f6"},
@@ -295,6 +335,15 @@ func gradioComponentProps(c Component, input bool) map[string]any {
 		p["type"] = "text"
 		p["submit_btn"] = false
 		p["stop_btn"] = false
+		if c.MinLength != nil {
+			p["min_length"] = *c.MinLength
+		}
+		if c.MaxLength != nil {
+			p["max_length"] = *c.MaxLength
+		}
+		if c.Pattern != "" {
+			p["pattern"] = c.Pattern
+		}
 	case "slider":
 		if c.Min == nil {
 			p["minimum"] = 0
@@ -358,7 +407,81 @@ func gradioComponentProps(c Component, input bool) map[string]any {
 		p["file_count"] = "single"
 		p["file_types"] = nil
 	case "json":
-		p["value"] = map[string]any{}
+		if c.Value == nil {
+			p["value"] = map[string]any{}
+		}
+	case "markdown":
+		p["sanitize_html"] = true
+		p["line_breaks"] = true
+		p["header_links"] = false
+		p["show_copy_button"] = false
+		if c.Value == nil {
+			p["value"] = ""
+		}
+	case "dataframe":
+		p["datatype"] = "auto"
+		if len(c.Datatype) > 0 {
+			p["datatype"] = c.Datatype
+		}
+		if len(c.Headers) > 0 && c.Value == nil {
+			p["value"] = map[string]any{"headers": c.Headers, "data": []any{}, "metadata": nil}
+		}
+		p["type"] = "array"
+		p["wrap"] = true
+		p["show_row_numbers"] = true
+		p["show_fullscreen_button"] = true
+		p["show_copy_button"] = true
+		p["show_search"] = "filter"
+		p["row_count"] = []any{3, "dynamic"}
+		p["col_count"] = []any{3, "dynamic"}
+		p["column_count"] = []any{3, "dynamic"}
+		if c.Value == nil && len(c.Headers) == 0 {
+			p["value"] = map[string]any{"headers": []any{}, "data": []any{}, "metadata": nil}
+		}
+	case "chatbot":
+		p["type"] = "messages"
+		p["layout"] = "bubble"
+		p["render_markdown"] = true
+		p["sanitize_html"] = true
+		p["line_breaks"] = true
+		p["show_copy_button"] = true
+		p["show_copy_all_button"] = true
+		p["show_share_button"] = false
+		p["height"] = 460
+		p["bubble_full_width"] = false
+		p["avatar_images"] = []any{nil, nil}
+		p["feedback_options"] = []any{}
+		if c.Value == nil {
+			p["value"] = []any{}
+		} else if messages, err := normalizeGradioChatMessages(c.Value); err == nil {
+			p["value"] = messages
+		} else {
+			p["value"] = []any{}
+		}
+	case "gallery":
+		p["sources"] = []string{"upload", "clipboard"}
+		p["file_types"] = []string{"image"}
+		p["columns"] = 3
+		p["rows"] = 2
+		p["height"] = 420
+		p["object_fit"] = "cover"
+		p["allow_preview"] = true
+		p["preview"] = false
+		p["show_fullscreen_button"] = true
+		p["show_download_button"] = true
+		p["show_share_button"] = false
+		p["buttons"] = []string{"download", "fullscreen"}
+		if c.Value == nil {
+			p["value"] = []any{}
+		}
+	case "plot":
+		p["show_label"] = true
+		p["show_actions_button"] = true
+		p["format"] = "webp"
+		p["show_fullscreen_button"] = true
+		if c.Value == nil {
+			p["value"] = nil
+		}
 	}
 	return p
 }
