@@ -41,6 +41,17 @@ try {
     await sleep(7000);
    }
  }
+ if(process.argv.includes("--draft")){
+   const typed=await send("Runtime.evaluate",{expression:"(()=>{const x=document.querySelector('textarea');if(!x)return {missing:'textarea'};const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(x),'value')?.set;if(setter)setter.call(x,'Borrador persistente sin Submit');else x.value='Borrador persistente sin Submit';x.dispatchEvent(new Event('input',{bubbles:true}));x.dispatchEvent(new Event('change',{bubbles:true}));return {value:x.value}})()",returnByValue:true});
+   console.log("TYPED",JSON.stringify(typed));
+   await sleep(3500);
+   const saved=await send("Runtime.evaluate",{expression:"fetch('/api/state').then(r=>r.json()).then(x=>JSON.stringify(x))",returnByValue:true,awaitPromise:true});
+   console.log("PERSISTED",JSON.stringify(saved));
+   await send("Page.reload",{ignoreCache:true});
+   await sleep(9000);
+   const restored=await send("Runtime.evaluate",{expression:"JSON.stringify({value:document.querySelector('textarea')?.value,body:document.body.innerText.slice(0,160)})",returnByValue:true});
+   console.log("RESTORED",JSON.stringify(restored));
+ }
  if (process.argv.includes("--interact")) {
   const expression="(()=>{const input=document.querySelector('textarea')||document.querySelector('input[type=text]');if(!input)return {status:'missing input'};const set=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')?.set; if(set)set.call(input,'hola prueba');else input.value='hola prueba';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));const numeric=document.querySelector('input[type=number]');if(numeric){const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(numeric),'value')?.set;if(setter)setter.call(numeric,'3');else numeric.value='3';numeric.dispatchEvent(new Event('input',{bubbles:true}));numeric.dispatchEvent(new Event('change',{bubbles:true}));}const button=[...document.querySelectorAll('button')].find(b=>b.textContent.trim().includes('Submit'));if(!button)return {status:'missing button',element:input.outerHTML};button.click();return {status:'clicked',input:input.value,buttons:document.querySelectorAll('button').length}})()";
   const clicked=await send("Runtime.evaluate",{expression,returnByValue:true});

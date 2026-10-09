@@ -11,3 +11,12 @@ __pycache__/
 scripts/dev/_fixtures/
 
 scripts/dev/_screenshots/
+
+# Persistencia local y bases de datos
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm

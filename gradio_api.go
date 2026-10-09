@@ -49,13 +49,26 @@ func (a *App) gradioPredict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if fnIndex == 1 {
+		id, _ := IdentityFromContext(r.Context())
+		if err := a.deleteStoredState(r.Context(), id); err != nil {
+			http.Error(w, "Error limpiando estado", 500)
+			return
+		}
 		a.gradioReset(w, r)
+		return
+	}
+	if fnIndex >= 2 {
+		a.persistHandler(w, r, (fnIndex-2)/2, raw[0])
 		return
 	}
 	data, err := a.executeGradio(r.Context(), raw)
 	if err != nil {
 		writePredictionError(w, err)
 		return
+	}
+	id, _ := IdentityFromContext(r.Context())
+	if err := a.storeResults(r.Context(), id, raw, data); err != nil {
+		log.Printf("persistencia de predicción: %v", err)
 	}
 	writeJSON(w, 200, map[string]any{"data": data, "duration": 0.01, "average_duration": 0.01, "is_generating": false, "success": true})
 }
@@ -69,6 +82,10 @@ func (a *App) parseGradioRequest(w http.ResponseWriter, r *http.Request) ([]any,
 	if req.FnIndex != nil {
 		if *req.FnIndex == 1 {
 			return nil, 1, nil
+		}
+		if *req.FnIndex >= 2 && a.security != nil && a.security.cfg.PersistInputs &&
+			(*req.FnIndex-2)/2 < len(a.Config.Inputs) && len(req.Data) == 1 {
+			return req.Data, *req.FnIndex, nil
 		}
 		if *req.FnIndex != 0 {
 			return nil, 0, failPrediction(404, "EVENTO", "Evento desconocido")
@@ -138,6 +155,9 @@ func (a *App) executeGradio(ctx context.Context, raw []any) ([]any, error) {
 		if !fileID.MatchString(id) {
 			return nil, failPrediction(500, "ARCHIVO", "Resultado multimedia inválido")
 		}
+		if err := a.recordFile(ctx, id); err != nil {
+			return nil, err
+		}
 		info, err := os.Stat(filepath.Join(a.MediaDir, id))
 		if err != nil {
 			return nil, err
@@ -173,7 +193,7 @@ func (a *App) gradioCall(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 500, "INTERNO", "Fallo generando id")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), ctxIdentityKey{}, func() Identity { id, _ := IdentityFromContext(r.Context()); return id }()), 90*time.Second)
 	job := &gradioJob{created: time.Now(), finished: make(chan struct{}), cancel: cancel}
 	a.jobsMu.Lock()
 	if len(a.jobs) > 100 {
@@ -191,14 +211,23 @@ func (a *App) gradioCall(w http.ResponseWriter, r *http.Request) {
 	}
 	a.jobs[id] = job
 	a.jobsMu.Unlock()
+	jobIdentity, _ := IdentityFromContext(r.Context())
 	go func() {
 		defer cancel()
 		var results []any
 		var runErr error
+		idUser := jobIdentity
 		if fnIndex == 1 {
+			_ = a.deleteStoredState(ctx, idUser)
 			results = a.resetValues()
+		} else if fnIndex >= 2 {
+			runErr = a.storeInput(ctx, idUser, (fnIndex-2)/2, data[0])
+			results = []any{}
 		} else {
 			results, runErr = a.executeGradio(ctx, data)
+			if runErr == nil {
+				_ = a.storeResults(ctx, idUser, data, results)
+			}
 		}
 		job.complete(results, runErr)
 	}()
@@ -451,6 +480,11 @@ func (a *App) gradioUpload(w http.ResponseWriter, r *http.Request) {
 			apiError(w, 400, "SUBIDA", err.Error())
 			return
 		}
+		if err := a.recordFile(r.Context(), name); err != nil {
+			os.Remove(filepath.Join(a.MediaDir, name))
+			apiError(w, 500, "ARCHIVO", "Error de almacenamiento")
+			return
+		}
 		saved = append(saved, name)
 	}
 	if len(saved) == 0 {
@@ -492,7 +526,7 @@ func (a *App) storeGradioFile(file io.Reader, filename string, max int64) (strin
 }
 func (a *App) gradioFile(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/gradio_api/file=")
-	if !fileID.MatchString(id) {
+	if !fileID.MatchString(id) || !a.canAccessFile(r.Context(), id) {
 		http.NotFound(w, r)
 		return
 	}
@@ -538,6 +572,9 @@ func (a *App) resetValues() []any {
 }
 
 func (a *App) gradioReset(w http.ResponseWriter, r *http.Request) {
+	id, _ := IdentityFromContext(r.Context())
+	_ = a.deleteStoredState(r.Context(), id)
+
 	writeJSON(w, 200, map[string]any{"data": a.resetValues(), "duration": 0.0, "average_duration": 0.0, "is_generating": false, "success": true})
 }
 func setSafeMediaHeaders(w http.ResponseWriter, id string) {

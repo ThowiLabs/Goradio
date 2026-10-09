@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import hashlib
 import json
 import os
 import secrets
@@ -118,7 +119,8 @@ class Interface:
 
     def launch(self, share: bool | list[str] | tuple[str, ...] = False,
                server_name: str = "127.0.0.1", server_port: int = 7860,
-               block: bool = True, auth: tuple[str, str] | None = None) -> "Interface":
+               block: bool = True, auth: tuple[str, str] | None = None,
+               security: dict | None = None) -> "Interface":
         """Inicia el backend Go y su callback Python.
 
         share=True selecciona Cloudflare, localhost.run y Pinggy.
@@ -137,7 +139,19 @@ class Interface:
             raise FileNotFoundError("Instala Go o compila bin/goradio.exe")
         self._temporary = tempfile.TemporaryDirectory(prefix="goradio-")
         workdir = Path(self._temporary.name)
-        media_dir = workdir / "media"
+        if security is not None:
+            if auth is not None:
+                raise ValueError("No combines HTTP Basic auth con login persistente")
+            db_path = Path(security.get("db_path", "")).expanduser()
+            if not str(security.get("db_path", "")).strip():
+                raise ValueError("security.db_path debe apuntar a un archivo SQLite permanente")
+            db_path = db_path.resolve()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            # Los archivos siguen existiendo tras cerrar el proceso de Python.
+            app_id = security.get("app_id") or ("app_" + hashlib.sha256(self.title.encode("utf-8")).hexdigest()[:16])
+            media_dir = db_path.parent / ("goradio-media-" + app_id)
+        else:
+            media_dir = workdir / "media"
         media_dir.mkdir(mode=0o700)
         _MEDIA_ROOT = media_dir
 
@@ -190,6 +204,17 @@ class Interface:
                               "--media-dir", str(media_dir),
                               "--callback-url", f"http://127.0.0.1:{self._server.server_port}/callback",
                               "--share", ",".join(providers)]
+            if security is not None:
+                command += ["--security-db", str(db_path),
+                            "--app-id", app_id]
+                if security.get("require_login", False):
+                    command.append("--require-login")
+                if security.get("allow_signup", False):
+                    command.append("--allow-signup")
+                if security.get("persist", True):
+                    command.append("--persist")
+                if security.get("bootstrap_user"):
+                    command.extend(["--bootstrap-user", security["bootstrap_user"]])
             env = os.environ.copy()
             env["GORADIO_PYTHON"] = os.sys.executable
             env["GORADIO_CALLBACK_TOKEN"] = token

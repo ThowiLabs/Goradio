@@ -1,5 +1,13 @@
 # Cambios
 
+## 0.3.0 — 2026-10-09
+- Middleware de login y logout; altas administrativas y registro opcional.
+- Sesiones duraderas SQLite con contraseñas Argon2id, cookies HttpOnly, CSRF y rate limit básico.
+- Autoguardado de entradas al escribir, persistencia de resultados y restauración al recargar.
+- Control de acceso a archivos multimedia por propietario.
+- Configuración de seguridad desde Go, Python y CLI; ejemplos independientes y pruebas de reinicio/multiusuario.
+
+
 ## 0.2.0 — 2026-10-09
 - Integración del frontend original compilado de Gradio 6.30.0 con conservación de su licencia.
 - Adaptador Go para configuración, predicción directa, eventos, subida y visualización multimedia.

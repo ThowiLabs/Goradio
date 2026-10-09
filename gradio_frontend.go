@@ -78,7 +78,7 @@ func (a *App) gradioIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	config := a.gradioConfig()
+	config := a.gradioConfigForRequest(r)
 	encoded, err := json.Marshal(config)
 	if err != nil {
 		http.Error(w, "Error de configuración", 500)
@@ -92,10 +92,12 @@ func (a *App) gradioIndex(w http.ResponseWriter, r *http.Request) {
  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
  <meta name="referrer" content="no-referrer"><base href="/">
  <link rel="stylesheet" href="/goradio-share.css">
+ <link rel="stylesheet" href="/goradio-auth.css">
  <title>Goradio</title>
  <script>window.gradio_config=%s;window.__gradio_mode__="app";window.iFrameResizer={autoResize:false,sizeWidth:false,onReady:()=>{}};</script>
  <script type="module" crossorigin src="/assets/index-D88pgWqG.js"></script>
  <script defer src="/goradio-share.js"></script>
+ <script defer src="/goradio-auth.js"></script>
  <link rel="stylesheet" crossorigin href="/assets/index-DuOipanW.css">
  </head><body style="margin:0;min-height:100vh;display:flex;flex-direction:column">
  <gradio-app control_page_title="true" embed="false" eager="true" style="display:flex;flex-direction:column;flex-grow:1"></gradio-app>
@@ -199,6 +201,30 @@ func (a *App) gradioConfig() map[string]any {
 			"event_specific_args": nil, "component_prop_inputs": []int{},
 		},
 	}
+	// Eventos reactivos nativos Gradio. Cada input se guarda sin pulsar Submit.
+	// input captura escritura y slider en tiempo real; change cubre selects y otros.
+	if a.security != nil && a.security.cfg.PersistInputs {
+		for i, inputID := range inputs {
+			for _, trigger := range []string{"input", "change"} {
+				index := 2 + i*2
+				if trigger == "change" {
+					index++
+				}
+				deps = append(deps, map[string]any{
+					"id": index, "targets": []any{[]any{inputID, trigger}},
+					"inputs": []int{inputID}, "outputs": []int{},
+					"backend_fn": true, "queue": false, "api_name": fmt.Sprintf("autosave_%d_%s", i, trigger),
+					"api_description": nil, "scroll_to_output": false, "show_progress": "hidden",
+					"batch": false, "max_batch_size": 4, "cancels": []any{},
+					"types":               map[string]bool{"generator": false, "cancel": false},
+					"collects_event_data": false, "trigger_after": nil, "trigger_only_on_success": false,
+					"trigger_only_on_failure": false, "trigger_mode": "always_last", "api_visibility": "private",
+					"rendered_in": nil, "render_id": nil, "connection": "sse", "time_limit": nil,
+					"stream_every": 0.5, "event_specific_args": nil, "component_prop_inputs": []int{},
+				})
+			}
+		}
+	}
 	ids := make([]int, 0, next)
 	for n := 1; n <= next; n++ {
 		ids = append(ids, n)
@@ -214,7 +240,13 @@ func (a *App) gradioConfig() map[string]any {
 		"body_css":    map[string]string{"body_background_fill": "white", "body_text_color": "#1f2937", "body_background_fill_dark": "#0b0f19", "body_text_color_dark": "#f3f4f6"},
 		"fill_height": false, "fill_width": false, "theme_hash": 0, "pwa": false,
 		"pages": []any{[]any{"", "", true}}, "current_page": "", "root": "",
-		"page":     map[string]any{"": map[string]any{"layout": layout, "components": ids, "dependencies": []int{0, 1}}},
+		"page": map[string]any{"": map[string]any{"layout": layout, "components": ids, "dependencies": func() []int {
+			v := make([]int, len(deps))
+			for i := range v {
+				v[i] = i
+			}
+			return v
+		}()}},
 		"username": nil, "dependencies": deps, "layout": layout,
 	}
 	return cfg
@@ -324,7 +356,7 @@ func gradioComponentProps(c Component, input bool) map[string]any {
 	return p
 }
 func (a *App) gradioConfigResponse(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, a.gradioConfig())
+	writeJSON(w, 200, a.gradioConfigForRequest(r))
 }
 func (a *App) gradioTheme(w http.ResponseWriter, r *http.Request) {
 	theme, err := assets.ReadFile("static/gradio-default-theme.css")

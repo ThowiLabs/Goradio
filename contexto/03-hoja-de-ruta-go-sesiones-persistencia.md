@@ -87,4 +87,4 @@ Goradio debe ser un framework independiente, escrito principalmente en Go, con f
 - El usuario puede `import` Goradio desde un segundo proyecto sin copiarlo; `go get` público se verificará tras configurar remoto.
 - Las URL compartidas no permiten eludir las políticas de autenticación.
 
-**Importante:** este archivo registra los requisitos y la propuesta. No implica que login, DB o persistencia estén implementados todavía.
+**Actualización 2026-10-09:** la versión experimental 0.3.0 implementa login, sesiones SQLite, autoguardado y aislamiento básico. Ver `contexto/04-version-0.3-sesiones-login.md` para la lista de funciones verificadas y sus limitaciones.

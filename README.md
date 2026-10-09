@@ -55,6 +55,7 @@ The application is available at `http://127.0.0.1:7860`.
 - Image, audio, video, file and JSON components.
 - Bundled compiled Gradio 6.30.0 frontend.
 - Basic Gradio-compatible API and multimedia uploads.
+- Optional SQLite accounts, sessions and persisted form state.
 - Optional public sharing with supported tunnel providers.
 
 ## Public sharing
@@ -75,6 +76,23 @@ demo.launch(share=["cloudflare", "pinggy"])
 
 Sharing exposes application endpoints to the Internet. Enable
 authentication and validate all user-provided values.
+
+## Authentication and persistence
+
+Goradio supports optional SQLite-backed users and saved form state.
+
+```python
+demo.launch(security={
+    "db_path": "./data/app.sqlite",
+    "app_id": "my-app",
+    "require_login": True,
+    "persist": True,
+    "bootstrap_user": "admin",
+})
+```
+
+Set the initial password as described in the
+[security guide](docs/SECURITY_AND_PERSISTENCE.md).
 
 ## Compatibility
 

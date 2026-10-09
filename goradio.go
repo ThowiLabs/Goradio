@@ -50,6 +50,8 @@ type App struct {
 	jobs           map[string]*gradioJob
 	uploadsMu      sync.Mutex
 	uploads        map[string]*uploadState
+	security       *securityBackend
+	stateMu        sync.Mutex
 }
 
 var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "image": true, "audio": true, "video": true, "file": true, "json": true}
@@ -124,15 +126,17 @@ func (a *App) Routes() http.Handler {
 	mux.Handle("GET /app.js", assetHandler())
 	mux.Handle("GET /goradio-share.js", assetHandler())
 	mux.Handle("GET /goradio-share.css", assetHandler())
+	mux.Handle("GET /goradio-auth.js", assetHandler())
+	mux.Handle("GET /goradio-auth.css", assetHandler())
 	mux.Handle("GET /app.css", assetHandler())
 	mux.HandleFunc("GET /", a.gradioIndex)
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	baseHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		user, pass := os.Getenv("GORADIO_AUTH_USER"), os.Getenv("GORADIO_AUTH_PASSWORD")
-		if user != "" || pass != "" {
+		if a.security == nil && (user != "" || pass != "") {
 			givenUser, givenPass, ok := r.BasicAuth()
 			matchUser := subtle.ConstantTimeCompare([]byte(givenUser), []byte(user)) == 1
 			matchPass := subtle.ConstantTimeCompare([]byte(givenPass), []byte(pass)) == 1
@@ -144,6 +148,10 @@ func (a *App) Routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+	if a.security != nil {
+		return a.secureRoutes(baseHandler)
+	}
+	return baseHandler
 }
 func (a *App) Serve(ctx context.Context, host string, port int, providers []string) error {
 	if host == "" {
@@ -397,6 +405,11 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 413, "LIMITE", "Archivo demasiado grande")
 		return
 	}
+	if err := a.recordFile(r.Context(), id); err != nil {
+		os.Remove(path)
+		apiError(w, 500, "ARCHIVO", "No se pudo registrar el archivo")
+		return
+	}
 	writeJSON(w, 200, map[string]string{"url": "/api/media/" + id, "name": header.Filename, "mime": mime})
 }
 func validMediaType(kind, mime, ext string) bool {
@@ -415,6 +428,10 @@ func validMediaType(kind, mime, ext string) bool {
 func (a *App) media(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("file")
 	if !fileID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	if !a.canAccessFile(r.Context(), id) {
 		http.NotFound(w, r)
 		return
 	}
