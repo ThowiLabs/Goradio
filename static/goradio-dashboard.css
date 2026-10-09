@@ -1,0 +1,40 @@
+/* Goradio SB Admin dashboard. Los controles Gradio son originales. */
+:root {--gd-sidebar:#18253b;--gd-accent:#4b9fe5;--gd-sidebar-width:252px;--gd-text:#d4e1f2}
+body:has(.gd-layout){background:#f4f7fb!important;min-height:100vh}
+.gd-layout{display:flex;min-height:100vh;width:100%;background:#f4f7fb;color:#243247}
+.gd-sidebar{position:fixed;inset:0 auto 0 0;z-index:1010;width:var(--gd-sidebar-width);background:linear-gradient(165deg,#1a2942 0%,#142139 72%,#111b2c 100%);color:var(--gd-text);display:flex;flex-direction:column;box-shadow:2px 0 18px #1b304316}
+.gd-brand{display:flex;align-items:center;gap:11px;padding:23px 19px 21px;color:white!important;text-decoration:none!important;font:700 18px system-ui,sans-serif;letter-spacing:.4px;border-bottom:1px solid #ffffff1c}
+.gd-brand-mark{display:grid;place-items:center;width:37px;height:37px;background:linear-gradient(150deg,#54b9ff,#4875d9);border-radius:11px;font-weight:800;color:white;box-shadow:0 4px 16px #208ffc55}
+.gd-brand-sub{display:block;font-size:9px;font-weight:650;letter-spacing:2.5px;color:#93a9c3;margin-top:1px}
+.gd-side-scroll{overflow-y:auto;flex:1;padding:16px 12px 16px;scrollbar-width:thin;scrollbar-color:#68788b transparent}
+.gd-nav-caption{font:750 10px system-ui,sans-serif;letter-spacing:1.6px;color:#8b9cb5;padding:16px 12px 8px;text-transform:uppercase}
+.gd-nav-link{display:flex;align-items:center;gap:12px;padding:11px 13px;margin:3px 0;border-radius:9px;color:#becee3!important;text-decoration:none!important;font:550 13.5px system-ui,sans-serif;position:relative;transition:background .18s,color .18s}
+.gd-nav-link:hover{background:#ffffff12;color:white!important}
+.gd-nav-link.is-active{background:linear-gradient(100deg,#3284c766,#4283c51a);box-shadow:inset 3px 0 #53aef0;color:#fff!important;font-weight:700}
+.gd-nav-link:focus-visible,.gd-menu-toggle:focus-visible{outline:2px solid #76b9fc;outline-offset:2px}
+.gd-nav-icon{display:grid;place-items:center;width:19px;height:19px;opacity:.83;flex-shrink:0}
+.gd-nav-icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.gd-sidebar-footer{padding:17px 20px;border-top:1px solid #ffffff18;color:#7f96b5;font:650 10px system-ui;letter-spacing:1.3px}
+.gd-main{display:flex;flex-direction:column;min-height:100vh;width:calc(100% - var(--gd-sidebar-width));margin-left:var(--gd-sidebar-width);min-width:0}
+.gd-topbar{position:sticky;top:0;z-index:997;display:flex;align-items:center;gap:15px;min-height:66px;padding:0 34px;background:#fff;border-bottom:1px solid #e7edf4;box-shadow:0 3px 12px #20304908}
+.gd-top-title{font:700 13px system-ui,sans-serif;color:#334a62}.gd-crumb{font-weight:500;color:#91a0b4}
+.gd-header-spacer{flex:1}.gd-status{display:flex;align-items:center;gap:8px;border:1px solid #e4ebf1;border-radius:50px;padding:7px 12px;font:600 11px system-ui;color:#65798b}
+.gd-status i{background:#41bc8a;width:7px;height:7px;border-radius:100%}
+.gd-content{flex:1;width:100%;padding:26px clamp(18px,3vw,48px) 65px;margin:0 auto;max-width:1660px;box-sizing:border-box}
+.gd-page-header{padding:0 0 15px;border-bottom:1px solid #e6ecf2;margin-bottom:21px}.gd-page-header p{margin:0 0 7px;color:#8594a6;font:750 10px system-ui;letter-spacing:1.5px;text-transform:uppercase}.gd-page-header h1{margin:0;color:#23354e;font:750 clamp(23px,2.4vw,29px) system-ui;letter-spacing:-.5px}
+.gd-content gradio-app{width:100%;max-width:100%;min-width:0;display:flex;flex-direction:column}
+.gd-content gradio-app .gradio-container{max-width:100%!important;margin:0!important;padding:0!important;background:transparent!important}
+.gd-menu-toggle{display:none;place-items:center;border:1px solid #e3eaf3;background:white;color:#36516c;border-radius:9px;min-width:39px;height:36px;cursor:pointer;font-size:20px}
+.gd-backdrop{display:none}
+@media(max-width:1024px){.gd-sidebar{width:231px}.gd-main{margin-left:231px;width:calc(100% - 231px)}.gd-content{padding:22px 22px 54px}.gd-topbar{padding:0 22px}}
+@media(max-width:790px){
+ .gd-sidebar{transform:translateX(-102%);transition:transform .23s ease;box-shadow:6px 0 18px #09213a29;width:min(280px,82vw)}
+ .gd-main{margin-left:0;width:100%}
+ .gd-menu-toggle{display:grid}.gd-topbar{min-height:61px;padding:0 15px}
+ .gd-content{padding:21px 14px 80px}
+ .gd-layout.gd-menu-open .gd-sidebar{transform:translateX(0)}
+ .gd-layout.gd-menu-open .gd-backdrop{display:block;position:fixed;inset:0;background:#101a2d80;z-index:1008}
+ .gd-layout.gd-menu-open .gd-menu-toggle{background:#e7f1fb}
+ .gd-status{display:none}
+}
+@media(max-width:480px){.gd-page-header h1{font-size:23px}.gd-top-title{font-size:12px}.gd-crumb{display:none}.gd-content{padding-left:11px;padding-right:11px}}

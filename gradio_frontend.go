@@ -79,6 +79,13 @@ func (a *App) gradioIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	config := a.gradioConfigForRequest(r)
+	extraHead, shellOpen, shellClose := "", "", ""
+	if ctx, ok := r.Context().Value(dashboardCtxKey{}).(dashboardPageContext); ok {
+		// Las peticiones EventSource y elementos multimedia no pueden incluir
+		// X-Goradio-Page: su Referer same-origin identifica la ventana activa.
+		w.Header().Set("Referrer-Policy", "same-origin")
+		extraHead, shellOpen, shellClose = dashboardShell(ctx)
+	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
 		http.Error(w, "Error de configuración", 500)
@@ -90,7 +97,7 @@ func (a *App) gradioIndex(w http.ResponseWriter, r *http.Request) {
 	// El documento hospedador solo aporta la configuración nativa generada por Go.
 	fmt.Fprintf(w, `<!doctype html><html lang="es"><head>
  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
- <meta name="referrer" content="no-referrer"><base href="/">
+ <meta name="referrer" content="same-origin"><base href="/">%s
  <link rel="stylesheet" href="/goradio-share.css">
  <link rel="stylesheet" href="/goradio-auth.css">
  <title>Goradio</title>
@@ -100,8 +107,8 @@ func (a *App) gradioIndex(w http.ResponseWriter, r *http.Request) {
  <script defer src="/goradio-auth.js"></script>
  <link rel="stylesheet" crossorigin href="/assets/index-DuOipanW.css">
  </head><body style="margin:0;min-height:100vh;display:flex;flex-direction:column">
- <gradio-app control_page_title="true" embed="false" eager="true" style="display:flex;flex-direction:column;flex-grow:1"></gradio-app>
- </body></html>`, encoded)
+ %s<gradio-app control_page_title="true" embed="false" eager="true" style="display:flex;flex-direction:column;flex-grow:1"></gradio-app>%s
+ </body></html>`, extraHead, encoded, shellOpen, shellClose)
 }
 
 type node map[string]any

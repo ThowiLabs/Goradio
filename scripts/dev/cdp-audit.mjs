@@ -21,8 +21,16 @@ try {
  if(m.method==="Network.responseReceived" && m.params?.response?.status<400 && !m.params?.response?.url?.includes("/gradio_api/run/"))return; if(m.method==="Network.requestWillBeSent" && !(/gradio_api|config|theme/.test(m.params?.request?.url??"")))return;
  events.push({kind:m.method,url:m.params?.response?.url||m.params?.request?.url||m.params?.requestId,status:m.params?.response?.status,stack:m.params?.stackTrace?.callFrames?.slice(0,3).map(f=>({url:f.url,line:f.lineNumber,fn:f.functionName})),text:(m.params?.entry?.text||m.params?.exceptionDetails?.exception?.description||m.params?.exceptionDetails?.text||m.params?.args?.map(a=>a.value||a.description).join(" ")||m.params?.errorText||"").slice(0,450)});}};
  for(const method of ["Runtime.enable","Page.enable","Network.enable","Log.enable"])await send(method);
+ if(process.argv.includes("--mobile"))await send("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
  await send("Page.navigate",{url});
  await sleep(10000);
+ if(process.argv.includes("--mobile")){
+   const before=await send("Runtime.evaluate",{expression:"(()=>({open:document.querySelector('.gd-layout')?.classList.contains('gd-menu-open'),visible:getComputedStyle(document.querySelector('.gd-menu-toggle')).display,expanded:document.querySelector('#gd-menu-toggle')?.getAttribute('aria-expanded')}))()",returnByValue:true});
+   const opened=await send("Runtime.evaluate",{expression:"(()=>{document.querySelector('#gd-menu-toggle')?.click();return {open:document.querySelector('.gd-layout')?.classList.contains('gd-menu-open'),expanded:document.querySelector('#gd-menu-toggle')?.getAttribute('aria-expanded')}})()",returnByValue:true});
+   const closed=await send("Runtime.evaluate",{expression:"(()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return {open:document.querySelector('.gd-layout')?.classList.contains('gd-menu-open'),expanded:document.querySelector('#gd-menu-toggle')?.getAttribute('aria-expanded')}})()",returnByValue:true});
+   console.log("MOBILE",JSON.stringify({before,opened,closed}));
+ }
+
  if(process.argv.includes("--upload-image")||process.argv.includes("--upload-audio")||process.argv.includes("--upload-video")){
    const kind=process.argv.includes("--upload-video")?"video":process.argv.includes("--upload-audio")?"audio":"image";
    const filename=kind==="video"?join(process.cwd(),"scripts","dev","_fixtures","tiny.mp4"):kind==="audio"?join(process.cwd(),"scripts","dev","_fixtures","tone.wav"):join(profile,"tiny.png");

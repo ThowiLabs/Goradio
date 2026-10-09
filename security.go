@@ -295,7 +295,7 @@ type ctxCSRFKey struct{}
 func (a *App) secureRoutes(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")
-		if r.URL.Path == "/api/health" || r.URL.Path == "/gradio_api/health" || strings.HasPrefix(r.URL.Path, "/assets/") || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/goradio-share") || r.URL.Path == "/theme.css" || r.URL.Path == "/favicon.ico" || r.URL.Path == "/favicon.png" {
+		if r.URL.Path == "/api/health" || r.URL.Path == "/gradio_api/health" || strings.HasPrefix(r.URL.Path, "/assets/") || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/goradio-share") || strings.HasPrefix(r.URL.Path, "/goradio-dashboard") || r.URL.Path == "/theme.css" || r.URL.Path == "/favicon.ico" || r.URL.Path == "/favicon.png" {
 			next.ServeHTTP(w, r)
 			return
 		}

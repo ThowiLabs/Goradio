@@ -13,6 +13,7 @@ The project embeds the compiled **Gradio 6.30.0 frontend** and implements a comp
 - **Go-first runtime** — HTTP server, routing, request validation, and execution backed by Go.
 - **Python integration** — Define interfaces with familiar `Interface(fn, inputs, outputs)` semantics.
 - **Gradio frontend** — Reuses bundled Gradio 6.30.0 UI assets rather than imitating the interface.
+- **Multipage dashboards** — Responsive SB Admin–inspired sidebar, active navigation, independent routes and callbacks, shared login and per-page saved state.
 - **Interactive components** — Text, numbers, sliders, checkboxes, dropdowns, JSON, images, audio, video, and files.
 - **Native public sharing** — Generate `*.gradio.live` links using a Go implementation of the tunnel protocol; no separate `frpc` executable is required.
 - **Authentication and persistence** — Optional SQLite accounts, sessions, and saved form inputs and outputs.
@@ -115,6 +116,27 @@ func main() {
 
 The Go module currently uses the module path `goradio`. To import it into a separate Go project, use a local `replace` directive or update the module path for your deployment. See [the external-module example](examples/external-go-app).
 
+## Multipage dashboard
+
+Build multipage workspaces with independent Python callbacks and the bundled Gradio frontend:
+
+```python
+dashboard = gr.Dashboard(title="My workspace")
+dashboard.route("Home", "/", gr.Interface(
+    fn=lambda name: "Hello " + name,
+    inputs=gr.Textbox(label="Name"),
+    outputs=gr.Textbox(label="Greeting"),
+), icon="dashboard")
+dashboard.route("Tools", "/tools", gr.Interface(
+    fn=lambda text: text.upper(),
+    inputs=gr.Textbox(label="Text"),
+    outputs=gr.Textbox(label="Uppercase"),
+), icon="file")
+dashboard.launch()
+```
+
+For Go configuration, state isolation, routing and authentication, see the [dashboard guide](docs/DASHBOARD.md).
+
 ## Components
 
 | Component | Python helper | Typical value |
@@ -195,6 +217,7 @@ The framework has not undergone a production security audit. Before production d
 
 - [Security, authentication, and state persistence](docs/SECURITY_AND_PERSISTENCE.md)
 - [Native Gradio Live sharing](docs/GRADIO_NATIVE.md)
+- [Multipage dashboard](docs/DASHBOARD.md)
 - [Examples and showcase](examples/SHOWCASE.md)
 - [Release history](CHANGELOG.md)
 

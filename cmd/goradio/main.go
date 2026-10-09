@@ -58,9 +58,62 @@ func main() {
 		defer os.RemoveAll(dir)
 		*media = dir
 	}
-	app, err := goradio.New(cfg, handler, *media)
-	if err != nil {
+	var app interface {
+		EnableSecurity(goradio.SecurityConfig) error
+		Close() error
+		CreateUser(context.Context, string, string, string) error
+		UserExists(context.Context, string) (bool, error)
+		Serve(context.Context, string, int, []string) error
+	}
+	var pages struct {
+		Pages []struct {
+			Path        string              `json:"path"`
+			Title       string              `json:"title"`
+			Icon        string              `json:"icon"`
+			Group       string              `json:"group"`
+			Mode        string              `json:"mode"`
+			Description string              `json:"description"`
+			Inputs      []goradio.Component `json:"inputs"`
+			Outputs     []goradio.Component `json:"outputs"`
+		} `json:"pages"`
+	}
+	if err = json.Unmarshal(raw, &pages); err != nil {
 		log.Fatal(err)
+	}
+	if len(pages.Pages) > 0 {
+		dashboard, createErr := goradio.NewDashboard(cfg.Title)
+		if createErr != nil {
+			log.Fatal(createErr)
+		}
+		for _, page := range pages.Pages {
+			pageHandler := goradio.BuiltinHandler(page.Mode)
+			if *callback != "" {
+				slug := strings.Trim(page.Path, "/")
+				if slug == "" {
+					slug = "home"
+				}
+				pageHandler = goradio.PythonHandler(strings.TrimSuffix(*callback, "/")+"/"+slug, os.Getenv("GORADIO_CALLBACK_TOKEN"))
+			}
+			pageCfg := goradio.Config{
+				Title: page.Title, Description: page.Description, Inputs: page.Inputs, Outputs: page.Outputs,
+			}
+			if err := dashboard.Add(goradio.Window{
+				Path: page.Path, Title: page.Title, Icon: page.Icon, Group: page.Group,
+				Config: pageCfg, Handler: pageHandler,
+			}); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if err := dashboard.SetMediaDir(*media); err != nil {
+			log.Fatal(err)
+		}
+		app = dashboard
+	} else {
+		single, createErr := goradio.New(cfg, handler, *media)
+		if createErr != nil {
+			log.Fatal(createErr)
+		}
+		app = single
 	}
 
 	if *securityDB != "" {

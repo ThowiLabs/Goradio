@@ -94,6 +94,11 @@ func (a *App) Routes() http.Handler {
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, a.Config) })
 	mux.HandleFunc("GET /api/tunnels", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, a.tunnels.Snapshot()) })
+	// La UI consulta /auth/me también en el modo público. Sin seguridad
+	// se devuelve un estado anónimo explícito y no un 404 en consola.
+	mux.HandleFunc("GET /auth/me", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false, "identity": Identity{Guest: true}, "csrf": "", "login_required": false})
+	})
 	mux.HandleFunc("POST /api/predict", a.predict)
 	mux.HandleFunc("POST /api/upload", a.upload)
 	mux.HandleFunc("GET /api/media/{file}", a.media)
@@ -128,6 +133,8 @@ func (a *App) Routes() http.Handler {
 	mux.Handle("GET /goradio-share.css", assetHandler())
 	mux.Handle("GET /goradio-auth.js", assetHandler())
 	mux.Handle("GET /goradio-auth.css", assetHandler())
+	mux.Handle("GET /goradio-dashboard.css", assetHandler())
+	mux.Handle("GET /goradio-dashboard.js", assetHandler())
 	mux.Handle("GET /app.css", assetHandler())
 	mux.HandleFunc("GET /", a.gradioIndex)
 

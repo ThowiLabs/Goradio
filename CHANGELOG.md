@@ -1,5 +1,14 @@
 # Cambios
 
+## 0.4.0 — 2026-10-09
+- Dashboard multipágina Go y Python con sidebar responsive estilo SB Admin, grupos e indicador de página activa.
+- Ventanas con componentes, handler y estado persistente independientes.
+- Sesión SQLite compartida, aislamiento de formularios por ruta y eventos SSE correctamente enroutados.
+- Rutas relativas del frontend Gradio, fuentes y archivos compatibles con páginas anidadas.
+- Pruebas de seguridad, persistencia, callbacks Python–Go y Chromium de escritorio y móvil.
+- Documentación y ejemplos en docs/DASHBOARD.md y examples/dashboard-go/.
+
+
 ## 0.3.3 — 2026-10-09
 - Túnel oficial `gradio.live` integrado nativamente en Go: `share=gradio` ya no descarga ni ejecuta `frpc`.
 - Conexión TLS/FRP, yamux, cifrado, compresión, control y conexiones de trabajo sin proceso externo.

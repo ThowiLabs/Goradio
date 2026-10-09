@@ -21,7 +21,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 __all__ = [
-    "Interface", "Component", "Textbox", "Number", "Slider", "Checkbox",
+    "Interface", "Dashboard", "Component", "Textbox", "Number", "Slider", "Checkbox",
     "Dropdown", "Image", "Audio", "Video", "File", "JSON", "media",
 ]
 
@@ -132,6 +132,8 @@ class Interface:
         self._server: ThreadingHTTPServer | None = None
         self._temporary: tempfile.TemporaryDirectory | None = None
         self.local_url: str | None = None
+        self._dashboard_pages: dict | None = None
+        self._dashboard_definitions: list[dict] = []
 
     def launch(self, share: bool | list[str] | tuple[str, ...] = False,
                server_name: str = "127.0.0.1", server_port: int = 7860,
@@ -181,7 +183,7 @@ class Interface:
 
         class Callback(BaseHTTPRequestHandler):
             def do_POST(self):
-                if self.path != "/callback" or not hmac.compare_digest(
+                if not (self.path == "/callback" or (owner._dashboard_pages is not None and self.path.startswith("/callback/"))) or not hmac.compare_digest(
                     self.headers.get("Authorization", ""), "Bearer " + token
                 ):
                     self.send_error(403)
@@ -192,11 +194,17 @@ class Interface:
                         raise ValueError("Tamaño de solicitud inválido")
                     request = json.loads(self.rfile.read(length))
                     data = request["data"]
-                    if not isinstance(data, list) or len(data) != len(owner.inputs):
+                    target = owner
+                    if owner._dashboard_pages is not None:
+                        slug = self.path.removeprefix("/callback/")
+                        target = owner._dashboard_pages.get(slug)
+                        if target is None:
+                            raise ValueError("Página desconocida")
+                    if not isinstance(data, list) or len(data) != len(target.inputs):
                         raise ValueError("Entradas incorrectas")
-                    result = owner.fn(*data)
-                    values = list(result) if len(owner.outputs) > 1 and isinstance(result, (tuple, list)) else [result]
-                    if len(values) != len(owner.outputs):
+                    result = target.fn(*data)
+                    values = list(result) if len(target.outputs) > 1 and isinstance(result, (tuple, list)) else [result]
+                    if len(values) != len(target.outputs):
                         raise ValueError("Número incorrecto de salidas")
                     payload = {"data": values}
                 except Exception as exc:
@@ -212,11 +220,28 @@ class Interface:
                 pass
 
         try:
-            self._server = ThreadingHTTPServer(("127.0.0.1", 0), Callback)
+            class CallbackServer(ThreadingHTTPServer):
+                # ThreadingHTTPServer hereda una cola TCP muy pequeña (5).
+                # Varias peticiones Gradio paralelas pueden causar WSAECONNREFUSED.
+                request_queue_size = 128
+                daemon_threads = True
+
+            self._server = CallbackServer(("127.0.0.1", 0), Callback)
             threading.Thread(target=self._server.serve_forever, daemon=True).start()
             cfg = {"title": self.title, "description": self.description,
                    "inputs": [c.config() for c in self.inputs],
                    "outputs": [c.config() for c in self.outputs]}
+            if self._dashboard_pages is not None:
+                if not self._dashboard_pages:
+                    raise ValueError("Dashboard requiere al menos una ruta")
+                cfg["pages"] = [
+                    {"title": page_data["title"], "path": page_data["path"],
+                     "icon": page_data["icon"], "group": page_data["group"],
+                     "description": page_data["app"].description,
+                     "inputs": [c.config() for c in page_data["app"].inputs],
+                     "outputs": [c.config() for c in page_data["app"].outputs]}
+                    for page_data in self._dashboard_definitions
+                ]
             config_path = workdir / "app.json"
             config_path.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
             base = [str(binary)] if binary.exists() else ["go", "run", "./cmd/goradio"]
@@ -292,3 +317,45 @@ class Interface:
             self._temporary.cleanup()
             self._temporary = None
         _MEDIA_ROOT = None
+
+
+class Dashboard(Interface):
+    """Panel multipágina con frontend Gradio y navegación lateral responsive.
+
+    API sugerida, inspirada en Blocks.route de Gradio 6::
+
+        dash = gr.Dashboard(title="Mi panel")
+        dash.route("Inicio", "/", gr.Interface(...), icon="dashboard")
+        dash.route("Imágenes", "/imagenes", gr.Interface(...), icon="image")
+        dash.launch(share=["gradio", "cloudflare"])
+    """
+
+    def __init__(self, title: str = "Goradio", description: str = "") -> None:
+        super().__init__(lambda: "", [], Textbox(label="Salida"),
+                         title=title, description=description)
+        self._dashboard_pages = {}
+
+    def route(self, title: str, path: str, app: Interface | None = None,
+              *, icon: str = "file", group: str = "") -> "Dashboard":
+        """Registra una ventana con una función y componentes independientes."""
+        if app is None:
+            raise ValueError("route requiere un gr.Interface para definir la página")
+        if not isinstance(app, Interface) or app is self:
+            raise TypeError("app debe ser un gr.Interface diferente del Dashboard")
+        import re
+        route = "/" if path in ("", "/") else "/" + path.strip("/")
+        if route != "/" and re.fullmatch(r"/[a-z][a-z0-9-]{0,47}", route) is None:
+            raise ValueError("Usa rutas como /imagenes o /mis-modelos")
+        if route in {"/api", "/gradio_api", "/auth", "/login", "/config", "/assets", "/static"}:
+            raise ValueError("Ruta reservada")
+        key = "home" if route == "/" else route.removeprefix("/")
+        if key in self._dashboard_pages:
+            raise ValueError(f"Ruta duplicada: {route}")
+        if not self._dashboard_pages:
+            self.inputs, self.outputs, self.fn = app.inputs, app.outputs, app.fn
+        self._dashboard_pages[key] = app
+        self._dashboard_definitions.append({
+            "path": route, "title": title or app.title, "icon": icon,
+            "group": group, "app": app,
+        })
+        return self
