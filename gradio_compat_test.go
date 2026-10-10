@@ -21,6 +21,9 @@ func TestGradioFrontend_OfficialAssetsAndContract(t *testing.T) {
 	if html.Code != 200 || !strings.Contains(html.Body.String(), "/assets/index-D88pgWqG.js") || !strings.Contains(html.Body.String(), "<gradio-app") {
 		t.Fatalf("frontend no disponible %d", html.Code)
 	}
+	if !strings.Contains(html.Body.String(), `.gradio-container > .main:has(button) > [data-testid="status-tracker"]:has(p.loading)`) {
+		t.Fatal("falta la protección para el indicador global de carga persistente")
+	}
 	css := httptest.NewRecorder()
 	app.Routes().ServeHTTP(css, httptest.NewRequest("GET", "/assets/index-DuOipanW.css", nil))
 	if css.Code != 200 || len(css.Body.Bytes()) < 500 {

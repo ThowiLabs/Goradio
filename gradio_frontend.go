@@ -100,6 +100,12 @@ func (a *App) gradioIndex(w http.ResponseWriter, r *http.Request) {
  <meta name="referrer" content="same-origin"><base href="/">%s
  <link rel="stylesheet" href="/goradio-share.css">
  <link rel="stylesheet" href="/goradio-auth.css">
+ <style>
+ /* deuda-tecnica: el tracker global de arranque del frontend 6.30 persiste
+    después de montar el formulario. Ocultar solo este estado obsoleto;
+    reevaluar al actualizar el bundle o corregir el ciclo de vida upstream. */
+ .gradio-container > .main:has(button) > [data-testid="status-tracker"]:has(p.loading) { display: none !important; }
+ </style>
  <title>Goradio</title>
  <script>window.gradio_config=%s;window.__gradio_mode__="app";window.iFrameResizer={autoResize:false,sizeWidth:false,onReady:()=>{}};</script>
  <script type="module" crossorigin src="/assets/index-D88pgWqG.js"></script>
