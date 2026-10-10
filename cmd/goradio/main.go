@@ -75,6 +75,8 @@ func main() {
 			Description  string              `json:"description"`
 			Inputs       []goradio.Component `json:"inputs"`
 			Outputs      []goradio.Component `json:"outputs"`
+			Layout       *goradio.LayoutNode `json:"layout"`
+			Events       []goradio.EventSpec `json:"events"`
 			Live         bool                `json:"live"`
 			Load         bool                `json:"load"`
 			EverySeconds float64             `json:"every_seconds"`
@@ -104,13 +106,25 @@ func main() {
 				}
 			}
 			pageCfg := goradio.Config{
-				Title: page.Title, Description: page.Description, Inputs: page.Inputs, Outputs: page.Outputs, Theme: cfg.Theme, Live: page.Live, Load: page.Load, EverySeconds: page.EverySeconds, Streaming: page.Streaming,
+				Title: page.Title, Description: page.Description, Inputs: page.Inputs, Outputs: page.Outputs, Layout: page.Layout, Events: page.Events, Theme: cfg.Theme, Live: page.Live, Load: page.Load, EverySeconds: page.EverySeconds, Streaming: page.Streaming,
 			}
 			if err := dashboard.Add(goradio.Window{
 				Path: page.Path, Title: page.Title, Icon: page.Icon, Group: page.Group,
 				Config: pageCfg, Handler: pageHandler, Stream: pageStream,
 			}); err != nil {
 				log.Fatal(err)
+			}
+			if *callback != "" {
+				for i := range page.Events {
+					slug := strings.Trim(page.Path, "/")
+					if slug == "" {
+						slug = "home"
+					}
+					url := strings.TrimSuffix(*callback, "/") + "/" + slug + "/event/" + fmt.Sprint(i)
+					if err := dashboard.BindEvent(page.Path, i, goradio.PythonHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN"))); err != nil {
+						log.Fatal(err)
+					}
+				}
 			}
 		}
 		if err := dashboard.SetMediaDir(*media); err != nil {
@@ -121,6 +135,14 @@ func main() {
 		single, createErr := goradio.New(cfg, handler, *media)
 		if createErr != nil {
 			log.Fatal(createErr)
+		}
+		if *callback != "" {
+			for i := range cfg.Events {
+				url := strings.TrimSuffix(*callback, "/") + "/event/" + fmt.Sprint(i)
+				if err := single.BindEvent(i, goradio.PythonHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN"))); err != nil {
+					log.Fatal(err)
+				}
+			}
 		}
 		if cfg.Streaming && *callback != "" {
 			single.SetStreamHandler(goradio.PythonStreamHandler(*callback, os.Getenv("GORADIO_CALLBACK_TOKEN")))

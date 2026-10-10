@@ -60,6 +60,18 @@ try {
    const restored=await send("Runtime.evaluate",{expression:"JSON.stringify({value:document.querySelector('textarea')?.value,body:document.body.innerText.slice(0,160)})",returnByValue:true});
    console.log("RESTORED",JSON.stringify(restored));
  }
+ if (process.argv.includes("--click-blocks")) {
+   const clicked=await send("Runtime.evaluate",{expression:"(()=>{const btn=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Resumir');if(!btn)return 'missing Resumir';btn.click();return 'clicked'})()",returnByValue:true});
+   console.log("BLOCKS CLICK",JSON.stringify(clicked));
+   await sleep(4000);
+ }
+ const activeTabArg=process.argv.find(arg=>arg.startsWith("--open-tab="));
+ if (process.argv.includes("--open-results") || activeTabArg) {
+   const label=activeTabArg?activeTabArg.slice("--open-tab=".length):"Resultados";
+   const opened=await send("Runtime.evaluate",{expression:"(()=>{const label="+JSON.stringify(label)+";const node=[...document.querySelectorAll('[role=tab]')].find(el=>el.textContent.trim()===label);if(!node)return {found:false};node.click();return {found:true,label}})()",returnByValue:true});
+   console.log("TAB",JSON.stringify(opened));
+   await sleep(2400);
+ }
  if (process.argv.includes("--interact")) {
   const expression="(()=>{const input=document.querySelector('textarea')||document.querySelector('input[type=text]');if(!input)return {status:'missing input'};const set=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')?.set; if(set)set.call(input,'hola prueba');else input.value='hola prueba';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));const numeric=document.querySelector('input[type=number]');if(numeric){const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(numeric),'value')?.set;if(setter)setter.call(numeric,'3');else numeric.value='3';numeric.dispatchEvent(new Event('input',{bubbles:true}));numeric.dispatchEvent(new Event('change',{bubbles:true}));}const button=[...document.querySelectorAll('button')].find(b=>b.textContent.trim().includes('Submit'));if(!button)return {status:'missing button',element:input.outerHTML};button.click();return {status:'clicked',input:input.value,buttons:document.querySelectorAll('button').length}})()";
   const clicked=await send("Runtime.evaluate",{expression,returnByValue:true});

@@ -21,7 +21,7 @@ editor, admin dashboard, or custom replacement widgets.
 | Dataframe | `Component{Type:"dataframe"}` | `gr.Dataframe(...)` | Real Gradio Dataframe; header and numeric cell validation |
 | Streaming Chatbot | `Component{Type:"chatbot"}` | `gr.Chatbot(...)` | Original Gradio component; plug in your own AI model |
 
-`gr.update` and `Then` are compatible subsets, **not** a complete reimplementation
+`gr.update` and `Then` are compatible subsets; see [native Blocks](BLOCKS.md) for Row/Tab and selected events. They are **not** a complete reimplementation
 of arbitrary Gradio `Blocks`, `State`, event graphs, cancellation policies,
 progress tracking, Dataframe editing callbacks, or every upstream property.
 

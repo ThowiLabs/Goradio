@@ -68,6 +68,12 @@ func (a *App) classifyFn(index int) (autosave bool, inputIndex int, valid bool) 
 	if a.security != nil && a.security.cfg.PersistInputs && index >= base && index < base+2*len(a.Config.Inputs) {
 		return true, (index - base) / 2, true
 	}
+	if a.security != nil && a.security.cfg.PersistInputs {
+		base += 2 * len(a.Config.Inputs)
+	}
+	if index >= base && index < base+len(a.Config.Events) {
+		return false, 0, true
+	}
 	return false, 0, false
 }
 func (a *App) gradioPredict(w http.ResponseWriter, r *http.Request) {
@@ -89,14 +95,22 @@ func (a *App) gradioPredict(w http.ResponseWriter, r *http.Request) {
 		a.persistHandler(w, r, idx, raw[0])
 		return
 	}
-	data, err := a.executeGradio(withGradioSession(r.Context(), r.Header.Get("X-Goradio-Session")), raw)
+	ctx := withGradioSession(r.Context(), r.Header.Get("X-Goradio-Session"))
+	var data []any
+	if _, _, custom := a.customEventForIndex(fnIndex); custom {
+		data, err = a.executeCustomEvent(ctx, fnIndex, raw)
+	} else {
+		data, err = a.executeGradio(ctx, raw)
+	}
 	if err != nil {
 		writePredictionError(w, err)
 		return
 	}
 	id, _ := IdentityFromContext(r.Context())
-	if err := a.storeResults(r.Context(), id, raw, data); err != nil {
-		log.Printf("persistencia de predicción: %v", err)
+	if _, _, custom := a.customEventForIndex(fnIndex); !custom {
+		if err := a.storeResults(r.Context(), id, raw, data); err != nil {
+			log.Printf("persistencia de predicción: %v", err)
+		}
 	}
 	writeJSON(w, 200, map[string]any{"data": data, "duration": 0.01, "average_duration": 0.01, "is_generating": false, "success": true})
 }
@@ -130,12 +144,16 @@ func (a *App) parseGradioRequest(w http.ResponseWriter, r *http.Request) ([]any,
 		}
 		return req.Data, fnIndex, nil
 	}
-	if len(req.Data) != len(a.Config.Inputs) {
+	inputs := a.Config.Inputs
+	if spec, _, custom := a.customEventForIndex(fnIndex); custom {
+		inputs = a.customEventInputComponents(spec)
+	}
+	if len(req.Data) != len(inputs) {
 		return nil, 0, failPrediction(400, "ENTRADAS", "Cantidad incorrecta de entradas")
 	}
 	data := make([]any, len(req.Data))
 	for i, v := range req.Data {
-		if !isMedia(a.Config.Inputs[i].Type) {
+		if !isMedia(inputs[i].Type) {
 			data[i] = v
 			continue
 		}
@@ -144,7 +162,7 @@ func (a *App) parseGradioRequest(w http.ResponseWriter, r *http.Request) ([]any,
 			continue
 		}
 		// Gradio VideoData usa {video: FileData, subtitles: FileData?}.
-		if a.Config.Inputs[i].Type == "video" {
+		if inputs[i].Type == "video" {
 			if videoData, ok := v.(map[string]any); ok {
 				if nested, exists := videoData["video"]; exists {
 					if nested == nil {
@@ -374,7 +392,9 @@ func (a *App) gradioCall(w http.ResponseWriter, r *http.Request) {
 			runErr = a.storeInput(ctx, idUser, idx, data[0])
 			results = []any{}
 		} else {
-			if a.Stream != nil {
+			if _, _, custom := a.customEventForIndex(fnIndex); custom {
+				results, runErr = a.executeCustomEvent(ctx, fnIndex, data)
+			} else if a.Stream != nil {
 				normalized := make([]any, len(data))
 				for i, c := range a.Config.Inputs {
 					normalized[i], runErr = a.validate(c, data[i])
@@ -445,7 +465,9 @@ func (a *App) gradioCall(w http.ResponseWriter, r *http.Request) {
 				results, runErr = a.executeGradio(ctx, data)
 			}
 			if runErr == nil {
-				_ = a.storeResults(ctx, idUser, data, results)
+				if _, _, custom := a.customEventForIndex(fnIndex); !custom {
+					_ = a.storeResults(ctx, idUser, data, results)
+				}
 			}
 		}
 		job.complete(results, runErr)

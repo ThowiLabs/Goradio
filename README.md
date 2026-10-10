@@ -14,7 +14,9 @@ The project embeds the compiled **Gradio 6.30.0 frontend** and implements a comp
 - **Python integration** — Define interfaces with familiar `Interface(fn, inputs, outputs)` semantics.
 - **Gradio frontend** — Reuses bundled Gradio 6.30.0 UI assets rather than imitating the interface.
 - **Multipage navigation** — Collapsible sidebar inspired by SB Admin, with the original Gradio interface and theme unchanged; independent routes and callbacks, shared login and optional per-page saved state. The sidebar inherits Gradio's theme and light/dark mode; the developer configures its primary and secondary colors in Go or Python, without exposing an editor to visitors.
-- **Interactive components** — Text, numbers, sliders, checkboxes, dropdowns, JSON, images, audio, video, files, Dataframe, Plot, Gallery and Chatbot (experimental).
+- **Interactive components** — Text, numbers, sliders, checkboxes, dropdowns, JSON, images, audio, video, files, Code, editable Dataframe, Plot, Gallery and Chatbot (experimental).
+- **Native Blocks layouts** — Validated Row, Column, Group, Tabs, Tab and Accordion trees with real Gradio Button actions bound to selected inputs and outputs; Go and Python APIs.
+- **Model-ready chat** — Python `ChatInterface(fn=...)` with real Gradio Chatbot, streaming and bounded per-session conversation history; model integration supplied by the developer.
 - **Reactive events and streaming** — Native `input`, `change`, page `load`, periodic Timer, SSE v3 streaming, output-property updates, sequential callbacks and bounded per-session state.
 - **Native public sharing** — Generate `*.gradio.live` links using a Go implementation of the tunnel protocol; no separate `frpc` executable is required.
 - **Authentication and persistence** — Optional SQLite accounts, sessions, and saved form inputs and outputs.
@@ -152,7 +154,8 @@ For Go configuration, state isolation, routing and authentication, see the [dash
 | Audio | `gr.Audio()` | Local uploaded file path |
 | Video | `gr.Video()` | Local uploaded file path |
 | File | `gr.File()` | Local uploaded file path |
-| Dataframe | `gr.Dataframe()` | Table data with headers and rows |
+| Code | `gr.Code()` | Editable syntax-highlighted source text |
+| Dataframe | `gr.Dataframe()` | Editable table with headers, rows and validation |
 | Plot | `gr.Plot()` | Plotly JSON-compatible value |
 | Gallery | `gr.Gallery()` | Registered local image paths |
 | Chatbot | `gr.Chatbot()` | Chat message history |
@@ -214,7 +217,7 @@ The compiled frontend is bundled under `third_party/gradio/`, with provenance an
 
 ## Compatibility and limitations
 
-Goradio implements a **subset** of Gradio's server protocol. It does not claim drop-in compatibility with all Gradio applications, including arbitrary `Blocks` layouts, full upstream queue semantics, complex dependency graphs, or every component configuration. The supported event triggers and progressive streaming are documented separately.
+Goradio implements a **subset** of Gradio's server protocol. It does not claim drop-in compatibility with all Gradio applications, including arbitrary `Blocks` event graphs, full upstream queue semantics, dynamic UI creation, or every component configuration. A validated subset of native Blocks containers and selected events is supported. The supported event triggers and progressive streaming are documented separately.
 
 The framework has not undergone a production security audit. Before production deployment, configure authentication, persistent storage, HTTPS, sensible resource limits, and monitoring. Public sharing endpoints are intended primarily for development and demonstrations.
 
@@ -224,6 +227,7 @@ The framework has not undergone a production security audit. Before production d
 - [Native Gradio Live sharing](docs/GRADIO_NATIVE.md)
 - [Multipage navigation](docs/DASHBOARD.md)
 - [Reactive events, streaming, tables and state](docs/REACTIVE.md)
+- [Native Blocks layouts, editable Dataframe, Code and ChatInterface](docs/BLOCKS.md)
 - [Examples and showcase](examples/SHOWCASE.md)
 - [Release history](CHANGELOG.md)
 

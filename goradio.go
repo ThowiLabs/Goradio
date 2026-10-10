@@ -22,21 +22,30 @@ import (
 )
 
 type Component struct {
-	Type        string   `json:"type"`
-	Label       string   `json:"label,omitempty"`
-	Section     string   `json:"section,omitempty"`
-	Placeholder string   `json:"placeholder,omitempty"`
-	Required    bool     `json:"required,omitempty"`
-	Min         *float64 `json:"min,omitempty"`
-	Max         *float64 `json:"max,omitempty"`
-	Step        *float64 `json:"step,omitempty"`
-	Value       any      `json:"value,omitempty"`
-	Choices     []string `json:"choices,omitempty"`
-	Pattern     string   `json:"pattern,omitempty"`
-	MinLength   *int     `json:"min_length,omitempty"`
-	MaxLength   *int     `json:"max_length,omitempty"`
-	Headers     []string `json:"headers,omitempty"`
-	Datatype    []string `json:"datatype,omitempty"`
+	Type           string   `json:"type"`
+	Key            string   `json:"key,omitempty"`
+	Label          string   `json:"label,omitempty"`
+	Section        string   `json:"section,omitempty"`
+	Placeholder    string   `json:"placeholder,omitempty"`
+	Required       bool     `json:"required,omitempty"`
+	Min            *float64 `json:"min,omitempty"`
+	Max            *float64 `json:"max,omitempty"`
+	Step           *float64 `json:"step,omitempty"`
+	Value          any      `json:"value,omitempty"`
+	Choices        []string `json:"choices,omitempty"`
+	Pattern        string   `json:"pattern,omitempty"`
+	MinLength      *int     `json:"min_length,omitempty"`
+	MaxLength      *int     `json:"max_length,omitempty"`
+	Headers        []string `json:"headers,omitempty"`
+	Datatype       []string `json:"datatype,omitempty"`
+	RowCount       int      `json:"row_count,omitempty"`
+	ColumnCount    int      `json:"column_count,omitempty"`
+	FixedRows      bool     `json:"fixed_rows,omitempty"`
+	FixedColumns   bool     `json:"fixed_columns,omitempty"`
+	ShowSearch     *bool    `json:"show_search,omitempty"`
+	ShowCopyButton *bool    `json:"show_copy_button,omitempty"`
+	Language       string   `json:"language,omitempty"`
+	Lines          int      `json:"lines,omitempty"`
 }
 type Theme struct {
 	PrimaryColor   string `json:"primary_color,omitempty"`
@@ -49,6 +58,8 @@ type Config struct {
 	Description  string      `json:"description,omitempty"`
 	Inputs       []Component `json:"inputs"`
 	Outputs      []Component `json:"outputs"`
+	Layout       *LayoutNode `json:"layout,omitempty"`
+	Events       []EventSpec `json:"events,omitempty"`
 	Live         bool        `json:"live,omitempty"`
 	Load         bool        `json:"load,omitempty"`
 	Streaming    bool        `json:"streaming,omitempty"`
@@ -65,6 +76,7 @@ type App struct {
 	Stream         StreamHandler
 	Validator      func(context.Context, []any) error
 	pipeline       []Handler
+	eventHandlers  map[int]Handler
 	MediaDir       string
 	MaxUploadBytes int64
 	tunnels        *TunnelManager
@@ -78,12 +90,15 @@ type App struct {
 	sessions       map[string]*sessionBucket
 }
 
-var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "image": true, "audio": true, "video": true, "file": true, "json": true, "markdown": true, "dataframe": true, "chatbot": true, "plot": true, "gallery": true}
+var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "image": true, "audio": true, "video": true, "file": true, "json": true, "markdown": true, "code": true, "dataframe": true, "chatbot": true, "plot": true, "gallery": true}
 var fileID = regexp.MustCompile(`^[a-f0-9]{32}(\.[a-z0-9]{1,10})?$`)
 
 func New(config Config, handler Handler, mediaDir string) (*App, error) {
 	if handler == nil {
 		return nil, errors.New("handler obligatorio")
+	}
+	if err := validateBlocksLayout(config); err != nil {
+		return nil, err
 	}
 	if err := validateTheme(config.Theme); err != nil {
 		return nil, err
@@ -115,6 +130,9 @@ func New(config Config, handler Handler, mediaDir string) (*App, error) {
 				return nil, fmt.Errorf("patrón inválido: %w", err)
 			}
 		}
+		if c.RowCount < 0 || c.RowCount > 10000 || c.ColumnCount < 0 || c.ColumnCount > 64 || c.Lines < 0 || c.Lines > 200 || len(c.Language) > 40 {
+			return nil, errors.New("límites inválidos de tabla o código")
+		}
 		if len(c.Headers) > 64 || len(c.Datatype) > 64 {
 			return nil, errors.New("demasiadas columnas")
 		}
@@ -128,7 +146,46 @@ func New(config Config, handler Handler, mediaDir string) (*App, error) {
 	if config.Title == "" {
 		config.Title = "Goradio"
 	}
-	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager(), jobs: map[string]*gradioJob{}, uploads: map[string]*uploadState{}, sessions: map[string]*sessionBucket{}}, nil
+	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager(), jobs: map[string]*gradioJob{}, uploads: map[string]*uploadState{}, sessions: map[string]*sessionBucket{}, eventHandlers: map[int]Handler{}}, nil
+}
+
+// BindEvent attaches a callback to an event already declared in Config.Events.
+func (a *App) BindEvent(index int, handler Handler) error {
+	if handler == nil || index < 0 || index >= len(a.Config.Events) {
+		return errors.New("evento o handler inválido")
+	}
+	if a.Config.Layout == nil {
+		return errors.New("eventos dirigidos requieren Blocks")
+	}
+	a.eventHandlers[index] = handler
+	return nil
+}
+
+// On declares a new native Gradio event and binds its Go callback.
+// Configure it before starting the server.
+func (a *App) On(spec EventSpec, handler Handler) error {
+	if a.Config.Layout == nil {
+		return errors.New("On requiere layout Blocks")
+	}
+	if handler == nil {
+		return errors.New("handler obligatorio")
+	}
+	if len(a.Config.Events) >= 64 {
+		return errors.New("máximo 64 eventos")
+	}
+	copyCfg := a.Config
+	copyCfg.Events = append(append([]EventSpec{}, copyCfg.Events...), spec)
+	if err := validateBlocksLayout(copyCfg); err != nil {
+		return err
+	}
+	for _, ev := range a.Config.Events {
+		if ev.Target == spec.Target && ev.Trigger == spec.Trigger {
+			return errors.New("evento duplicado")
+		}
+	}
+	a.Config.Events = copyCfg.Events
+	a.eventHandlers[len(a.Config.Events)-1] = handler
+	return nil
 }
 
 // SetStreamHandler enables progressive results over Gradio's SSE protocol.
@@ -397,7 +454,7 @@ func (a *App) validate(c Component, v any) (any, error) {
 		return v, nil
 	}
 	switch c.Type {
-	case "textbox":
+	case "textbox", "code":
 		txt, ok := v.(string)
 		if !ok {
 			return nil, errors.New("debe ser texto")

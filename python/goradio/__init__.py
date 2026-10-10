@@ -24,8 +24,8 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 __all__ = [
-    "Interface", "Dashboard", "Component", "Textbox", "Number", "Slider", "Checkbox",
-    "Dropdown", "Image", "Audio", "Video", "File", "JSON", "Theme", "Markdown", "Dataframe", "Chatbot", "Plot", "Gallery", "update", "state_get", "state_set", "media",
+    "Interface", "Dashboard", "Blocks", "ChatInterface", "Layout", "Button", "Row", "Column", "Group", "Tabs", "Tab", "Accordion", "Ref", "Component", "Textbox", "Number", "Slider", "Checkbox",
+    "Dropdown", "Image", "Audio", "Video", "File", "JSON", "Theme", "Markdown", "Code", "Dataframe", "Chatbot", "Plot", "Gallery", "update", "state_get", "state_set", "media",
 ]
 
 _ACTIVE_SESSION: contextvars.ContextVar = contextvars.ContextVar("goradio_active_session", default=None)
@@ -77,7 +77,7 @@ def state_set(key: str, value: Any) -> None:
 
 _MEDIA_ROOT: Path | None = None
 _TYPES = {"textbox", "number", "slider", "checkbox", "dropdown",
-          "image", "audio", "video", "file", "json", "markdown", "dataframe", "chatbot", "plot", "gallery"}
+          "image", "audio", "video", "file", "json", "markdown", "code", "dataframe", "chatbot", "plot", "gallery"}
 
 
 @dataclass
@@ -114,6 +114,15 @@ class Component:
     max_length: int | None = None
     headers: list[str] = field(default_factory=list)
     datatype: list[str] = field(default_factory=list)
+    row_count: int = 0
+    column_count: int = 0
+    fixed_rows: bool = False
+    fixed_columns: bool = False
+    show_search: bool | None = None
+    show_copy_button: bool | None = None
+    language: str = ""
+    lines: int = 0
+    key: str = ""
 
     def __post_init__(self) -> None:
         if self.type not in _TYPES:
@@ -124,6 +133,9 @@ class Component:
             self.max_length is not None and self.max_length < 0 or
             self.min_length is not None and self.max_length is not None and self.min_length > self.max_length):
             raise ValueError("Longitud de texto inválida")
+        if (not 0 <= self.row_count <= 10000 or not 0 <= self.column_count <= 64
+            or not 0 <= self.lines <= 200 or len(self.language) > 40):
+            raise ValueError("Límites inválidos de tabla o código")
         if self.pattern:
             import re
             if len(self.pattern) > 256:
@@ -135,6 +147,97 @@ class Component:
 
     def config(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
+
+
+
+@dataclass
+class Layout:
+    """A container or component reference in Gradio's native Blocks layout."""
+    type: str
+    label: str = ""
+    component: str = ""
+    key: str = ""
+    open: bool = False
+    children: list["Layout"] = field(default_factory=list)
+
+
+def Ref(key: str) -> Layout:
+    return Layout("component", component=key)
+
+
+def Button(key: str, label: str) -> Layout:
+    return Layout("button", key=key, label=label)
+
+
+def Row(*children: Layout) -> Layout:
+    return Layout("row", children=list(children))
+
+
+def Column(*children: Layout) -> Layout:
+    return Layout("column", children=list(children))
+
+
+def Group(*children: Layout) -> Layout:
+    return Layout("group", children=list(children))
+
+
+def Tabs(*children: Layout) -> Layout:
+    return Layout("tabs", children=list(children))
+
+
+def Tab(label: str, *children: Layout) -> Layout:
+    return Layout("tab", label=label, children=list(children))
+
+
+def Accordion(label: str, *children: Layout, open: bool = False) -> Layout:
+    return Layout("accordion", label=label, open=open, children=list(children))
+
+
+def _validate_layout(layout: Layout, inputs: list[Component], outputs: list[Component]) -> None:
+    import re
+    keys = [c.key for c in [*inputs, *outputs]]
+    if any(not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", k) for k in keys) or len(set(keys)) != len(keys):
+        raise ValueError("Blocks requiere keys válidas y únicas en todos los componentes")
+    available, used = set(keys), set()
+    buttons = set()
+    count = 0
+
+    def visit(node: Layout, parent: str = "", depth: int = 0) -> None:
+        nonlocal count
+        count += 1
+        if count > 128 or depth > 12:
+            raise ValueError("Layout excede los límites de tamaño o profundidad")
+        if node.type == "button":
+            if (not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", node.key) or node.key in buttons
+                or node.key in available or not node.label.strip() or node.children or node.component):
+                raise ValueError("Botón inválido o duplicado")
+            buttons.add(node.key)
+            return
+        if node.type == "component":
+            if node.component not in available or node.component in used or node.children or node.label:
+                raise ValueError("Referencia de componente inválida o repetida")
+            used.add(node.component)
+            return
+        if node.type not in {"row", "column", "group", "accordion", "tabs", "tab"}:
+            raise ValueError(f"Contenedor desconocido: {node.type}")
+        if node.component or node.key or not node.children:
+            raise ValueError("Contenedor inválido o vacío")
+        if node.type == "tab" and parent != "tabs":
+            raise ValueError("Tab debe estar dentro de Tabs")
+        if node.type == "tabs" and any(c.type != "tab" for c in node.children):
+            raise ValueError("Tabs solo admite Tab")
+        if node.type != "tabs" and any(c.type == "tab" for c in node.children):
+            raise ValueError("Tab requiere Tabs")
+        if node.type in {"tab", "accordion"} and (not node.label.strip() or len(node.label) > 90):
+            raise ValueError("La etiqueta del Tab/Accordion debe ser corta")
+        for child in node.children:
+            if not isinstance(child, Layout):
+                raise TypeError("Los hijos deben ser nodos Layout")
+            visit(child, node.type, depth + 1)
+
+    visit(layout)
+    if used != available:
+        raise ValueError("Todos los inputs y outputs deben aparecer una vez en Blocks")
 
 
 def Textbox(label="Texto", **kwargs): return Component("textbox", label, **kwargs)
@@ -151,6 +254,9 @@ def Video(label="Video", **kwargs): return Component("video", label, **kwargs)
 def File(label="Archivo", **kwargs): return Component("file", label, **kwargs)
 def JSON(label="JSON", **kwargs): return Component("json", label, **kwargs)
 def Markdown(value=None, label="Markdown", **kwargs): return Component("markdown", label, value=value, **kwargs)
+def Code(value=None, label="Código", language="python", lines=5, **kwargs):
+    return Component("code",label,value=value,language=language,lines=lines,**kwargs)
+
 def Dataframe(value=None, label="Tabla", headers=None, datatype=None, **kwargs):
     return Component("dataframe",label,value=value,headers=list(headers or []),datatype=list(datatype or []),**kwargs)
 def Chatbot(value=None, label="Conversación", **kwargs): return Component("chatbot", label, value=value, **kwargs)
@@ -225,12 +331,18 @@ class Interface:
     def __init__(self, fn: Callable, inputs: Any, outputs: Any,
                  title: str = "Goradio", description: str = "", theme: Theme | None = None,
                  live: bool = False, every: float = 0.0, load: bool = False,
-                 validate: Callable | None = None) -> None:
+                 validate: Callable | None = None,
+                 layout: Layout | None = None) -> None:
         if not callable(fn):
             raise TypeError("fn debe ser invocable")
         self.fn = fn
         self.inputs = _components(inputs)
         self.outputs = _components(outputs)
+        if layout is not None:
+            if not isinstance(layout, Layout):
+                raise TypeError("layout debe ser un nodo de Gradio Row, Column, Tabs, etc.")
+            _validate_layout(layout, self.inputs, self.outputs)
+        self.layout = layout
         if not self.outputs:
             raise ValueError("Se requiere una salida")
         self.title = title
@@ -248,6 +360,7 @@ class Interface:
             raise TypeError("validate debe ser una función")
         self.validator = validate
         self._chains: list[Callable] = []
+        self._events: list[tuple[dict, Callable]] = []
         self.streaming = inspect.isgeneratorfunction(fn)
         self._session_lock = threading.Lock()
         self._session_state: dict = {}
@@ -317,10 +430,26 @@ class Interface:
             def do_POST(self):
                 streaming = self.path.endswith("/stream")
                 base_path = self.path[:-7] if streaming else self.path
-                valid_path = base_path == "/callback" or (
-                    owner._dashboard_pages is not None
-                    and base_path.startswith("/callback/")
-                )
+                # Supported routes: /callback, /callback/event/N,
+                # /callback/PAGE and /callback/PAGE/event/N.
+                parts = base_path.removeprefix("/callback").strip("/").split("/")
+                if base_path == "/callback":
+                    parts = []
+                event_index = None
+                slug = None
+                if owner._dashboard_pages is None:
+                    valid_path = not parts or (
+                        len(parts) == 2 and parts[0] == "event" and parts[1].isdigit()
+                    )
+                    if len(parts) == 2:
+                        event_index = int(parts[1])
+                else:
+                    valid_path = (len(parts) == 1
+                                  or len(parts) == 3 and parts[1] == "event" and parts[2].isdigit())
+                    if valid_path:
+                        slug = parts[0]
+                        if len(parts) == 3:
+                            event_index = int(parts[2])
                 if not valid_path or not hmac.compare_digest(
                     self.headers.get("Authorization", ""), "Bearer " + token
                 ):
@@ -334,18 +463,26 @@ class Interface:
                     data = request["data"]
                     target = owner
                     if owner._dashboard_pages is not None:
-                        slug = base_path.removeprefix("/callback/")
                         target = owner._dashboard_pages.get(slug)
                         if target is None:
                             raise ValueError("Página desconocida")
-                    if not isinstance(data, list) or len(data) != len(target.inputs):
+                    event_fn = None
+                    output_count = len(target.outputs)
+                    input_count = len(target.inputs)
+                    if event_index is not None:
+                        if streaming or event_index >= len(target._events):
+                            raise ValueError("Evento desconocido o sin streaming")
+                        spec, event_fn = target._events[event_index]
+                        input_count = len(spec["inputs"])
+                        output_count = len(spec["outputs"])
+                    if not isinstance(data, list) or len(data) != input_count:
                         raise ValueError("Entradas incorrectas")
                     session = self.headers.get("X-Goradio-Session", "")
                     if session and not _SESSION_PATTERN.fullmatch(session):
                         raise ValueError("Identificador de sesión inválido")
                     token_ctx = _ACTIVE_SESSION.set((target, session) if session else None)
                     try:
-                        self._execute_callback(target, data, streaming)
+                        self._execute_callback(target, data, streaming, event_fn, output_count)
                     finally:
                         _ACTIVE_SESSION.reset(token_ctx)
                     return
@@ -357,9 +494,12 @@ class Interface:
                     self.end_headers()
                     self.wfile.write(encoded)
 
-            def _execute_callback(self, target, data, streaming):
-                if target.validator is not None:
+            def _execute_callback(self, target, data, streaming, event_fn=None, output_count=None):
+                if output_count is None:
+                    output_count = len(target.outputs)
+                if event_fn is None and target.validator is not None:
                     target.validator(*data)
+                fn = event_fn if event_fn is not None else target.fn
                 if streaming:
                     if not target.streaming:
                         raise ValueError("Función no es generadora")
@@ -370,9 +510,9 @@ class Interface:
                     self.end_headers()
                     try:
                         last_values = None
-                        for result in target.fn(*data):
-                            values = list(result) if len(target.outputs) > 1 and isinstance(result, (tuple, list)) else [result]
-                            if len(values) != len(target.outputs):
+                        for result in fn(*data):
+                            values = list(result) if output_count > 1 and isinstance(result, (tuple, list)) else [result]
+                            if len(values) != output_count:
                                 raise ValueError("Número incorrecto de salidas")
                             line = json.dumps({"data": values}, ensure_ascii=False).encode("utf-8") + b"\n"
                             if len(line) > 1048576:
@@ -382,10 +522,10 @@ class Interface:
                             last_values = values
                         if last_values is None:
                             raise ValueError("Generador no produjo resultados")
-                        for callback in target._chains:
+                        for callback in ([] if event_fn is not None else target._chains):
                             next_result = callback(*last_values)
-                            last_values = list(next_result) if len(target.outputs) > 1 and isinstance(next_result, (tuple, list)) else [next_result]
-                            if len(last_values) != len(target.outputs):
+                            last_values = list(next_result) if output_count > 1 and isinstance(next_result, (tuple, list)) else [next_result]
+                            if len(last_values) != output_count:
                                 raise ValueError("Función encadenada devolvió salidas incorrectas")
                             self.wfile.write(json.dumps({"data": last_values}, ensure_ascii=False).encode("utf-8") + b"\n")
                             self.wfile.flush()
@@ -395,14 +535,14 @@ class Interface:
                         self.wfile.write(json.dumps({"error": "Función generadora falló"}).encode("utf-8") + b"\n")
                         self.wfile.flush()
                     return
-                result = target.fn(*data)
-                values = list(result) if len(target.outputs) > 1 and isinstance(result, (tuple, list)) else [result]
-                if len(values) != len(target.outputs):
+                result = fn(*data)
+                values = list(result) if output_count > 1 and isinstance(result, (tuple, list)) else [result]
+                if len(values) != output_count:
                     raise ValueError("Número incorrecto de salidas")
-                for callback in target._chains:
+                for callback in ([] if event_fn is not None else target._chains):
                     next_result = callback(*values)
-                    values = list(next_result) if len(target.outputs) > 1 and isinstance(next_result, (tuple, list)) else [next_result]
-                    if len(values) != len(target.outputs):
+                    values = list(next_result) if output_count > 1 and isinstance(next_result, (tuple, list)) else [next_result]
+                    if len(values) != output_count:
                         raise ValueError("Función encadenada devolvió salidas incorrectas")
                 payload = json.dumps({"data": values}, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
@@ -427,6 +567,8 @@ class Interface:
                    "theme": asdict(self.theme) if self.theme is not None else None,
                    "live": self.live, "load": self.load, "every_seconds": self.every,
                    "streaming": self.streaming,
+                   "layout": asdict(self.layout) if self.layout is not None else None,
+                   "events": [spec for spec, _ in self._events],
                    "inputs": [c.config() for c in self.inputs],
                    "outputs": [c.config() for c in self.outputs]}
             if self._dashboard_pages is not None:
@@ -438,6 +580,8 @@ class Interface:
                      "description": page_data["app"].description,
                      "live": page_data["app"].live, "load": page_data["app"].load, "every_seconds": page_data["app"].every,
                      "streaming": page_data["app"].streaming,
+                     "layout": asdict(page_data["app"].layout) if page_data["app"].layout is not None else None,
+                     "events": [spec for spec, _ in page_data["app"]._events],
                      "inputs": [c.config() for c in page_data["app"].inputs],
                      "outputs": [c.config() for c in page_data["app"].outputs]}
                     for page_data in self._dashboard_definitions
@@ -517,6 +661,109 @@ class Interface:
             self._temporary.cleanup()
             self._temporary = None
         _MEDIA_ROOT = None
+
+
+class Blocks(Interface):
+    """Subset of Blocks with the original Gradio frontend.
+
+    Unlike Gradio's context-manager Blocks, Goradio defines a validated
+    explicit layout tree. Use gr.Row/gr.Tabs/gr.Ref to arrange components.
+    Events retain the Interface semantics (Submit, Live, Timer, streaming).
+    """
+    def __init__(self, fn: Callable, inputs: Any, outputs: Any,
+                 layout: Layout, **kwargs) -> None:
+        super().__init__(fn, inputs, outputs, layout=layout, **kwargs)
+
+    def on(self, target: str, trigger: str, fn: Callable,
+           inputs: list[str], outputs: list[str]) -> "Blocks":
+        """Bind click/change/input/submit/select to named components."""
+        if not callable(fn) or inspect.isgeneratorfunction(fn):
+            raise TypeError("on requiere una función normal (no generadora)")
+        if len(self._events) >= 64:
+            raise ValueError("Máximo 64 eventos")
+        keys_in = {c.key for c in self.inputs}
+        keys_out = {c.key for c in self.outputs}
+        buttons = set()
+        def visit(node: Layout):
+            if node.type == "button":
+                buttons.add(node.key)
+            for child in node.children:
+                visit(child)
+        visit(self.layout)
+        if target in buttons:
+            if trigger != "click":
+                raise ValueError("Button solo permite click")
+        elif (target not in keys_in | keys_out
+              or trigger not in {"change", "input", "submit", "select"}):
+            raise ValueError("Target o trigger desconocido")
+        if (not outputs or len(inputs) > 32 or len(outputs) > 32
+            or len(inputs) != len(set(inputs)) or len(outputs) != len(set(outputs))
+            or not set(inputs) <= keys_in or not set(outputs) <= keys_out):
+            raise ValueError("Entradas y salidas inválidas")
+        if any(spec["target"] == target and spec["trigger"] == trigger
+               for spec, _ in self._events):
+            raise ValueError("Evento duplicado")
+        spec = {"target": target, "trigger": trigger,
+                "inputs": list(inputs), "outputs": list(outputs)}
+        self._events.append((spec, fn))
+        return self
+
+
+
+class ChatInterface(Blocks):
+    """Native Gradio 6.30 Chatbot with session-scoped conversation history.
+
+    The supplied fn(message, history) provides model inference. It may return
+    a string or yield successive *complete* assistant responses. Goradio
+    does not ship or pretend to connect to an AI model automatically.
+    """
+    def __init__(self, fn: Callable, title: str = "Chat con IA",
+                 description: str = "", theme: Theme | None = None,
+                 max_history: int = 60) -> None:
+        if not callable(fn):
+            raise TypeError("fn(message, history) debe ser una función")
+        if not isinstance(max_history, int) or not 2 <= max_history <= 200:
+            raise ValueError("max_history debe estar entre 2 y 200")
+        self.model_fn = fn
+
+        def reply(message):
+            if not isinstance(message, str) or not message.strip():
+                raise ValueError("Escribe un mensaje")
+            history = state_get("goradio.chat.history", [])
+            if not isinstance(history, list):
+                history = []
+            history = history[-max_history:]
+            message = message.strip()[:2000]
+            prefix = [*history, {"role": "user", "content": message}]
+            answer = fn(message, list(history))
+            if inspect.isgenerator(answer):
+                final = None
+                for chunk in answer:
+                    if not isinstance(chunk, str):
+                        raise TypeError("El modelo debe emitir texto completo")
+                    final = chunk[:4000]
+                    yield [*prefix, {"role": "assistant", "content": final}]
+                if final is None:
+                    raise ValueError("El modelo no devolvió respuesta")
+            else:
+                if not isinstance(answer, str):
+                    raise TypeError("El modelo debe devolver texto")
+                final = answer[:4000]
+                yield [*prefix, {"role": "assistant", "content": final}]
+            stored = [*prefix, {"role": "assistant", "content": final}][-max_history:]
+            # Keep state well below the 64 KiB session-item limit, even after
+            # extended conversations or multibyte UTF-8 user messages.
+            while len(json.dumps(stored, ensure_ascii=False).encode("utf-8")) > 60000 and len(stored) > 2:
+                stored = stored[2:]
+            state_set("goradio.chat.history", stored)
+
+        super().__init__(
+            fn=reply,
+            title=title, description=description, theme=theme,
+            inputs=[Textbox(key="message", label="Mensaje", required=True)],
+            outputs=[Chatbot(key="conversation", label="Conversación")],
+            layout=Column(Ref("conversation"), Ref("message")),
+        )
 
 
 class Dashboard(Interface):

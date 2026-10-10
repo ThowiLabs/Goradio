@@ -113,6 +113,19 @@ func (d *Dashboard) Add(window Window) error {
 	return nil
 }
 
+// BindEvent connects a predeclared Blocks dependency on one dashboard page.
+func (d *Dashboard) BindEvent(path string, index int, handler Handler) error {
+	normalized, err := normalizeWindowPath(path)
+	if err != nil {
+		return err
+	}
+	app := d.apps[normalized]
+	if app == nil {
+		return errors.New("ventana inexistente")
+	}
+	return app.BindEvent(index, handler)
+}
+
 // SetTheme applies the same Gradio theme to every window in a dashboard.
 // Configure it before serving requests; no theme editor is rendered to users.
 func (d *Dashboard) SetTheme(theme Theme) error {

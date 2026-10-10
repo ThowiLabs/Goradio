@@ -272,11 +272,87 @@ func (a *App) gradioConfig() map[string]any {
 			}
 		}
 	}
+	layout := branch(root, leaf(header), branch(columns, branch(left, leftChildren...), branch(right, rightChildren...)))
+	if a.Config.Layout != nil {
+		refs := map[string]int{}
+		targets := map[string]int{}
+		for i, c := range a.Config.Inputs {
+			refs[c.Key] = inputs[i]
+			targets[c.Key] = inputs[i]
+		}
+		for i, c := range a.Config.Outputs {
+			refs[c.Key] = outputs[i]
+			targets[c.Key] = outputs[i]
+		}
+		var create func(LayoutNode) node
+		create = func(spec LayoutNode) node {
+			if spec.Type == "component" {
+				return leaf(refs[spec.Component])
+			}
+			if spec.Type == "button" {
+				n := id()
+				targets[spec.Key] = n
+				all = append(all, propsComponent(n, "button", map[string]any{
+					"value": spec.Label, "variant": "secondary", "visible": true, "size": "md", "interactive": true,
+					"elem_id": nil, "elem_classes": []string{},
+				}))
+				return leaf(n)
+			}
+			n := id()
+			kind := spec.Type
+			props := map[string]any{"visible": true, "elem_id": nil, "elem_classes": []string{}}
+			switch kind {
+			case "row":
+				props["equal_height"] = false
+			case "column":
+				props["scale"] = 1
+				props["min_width"] = 320
+				props["variant"] = "default"
+			case "accordion":
+				props["label"] = spec.Label
+				props["open"] = spec.Open
+			case "tabs":
+				props["selected"] = nil
+			case "tab":
+				kind = "tabitem"
+				props["label"] = spec.Label
+				props["id"] = nil
+				props["interactive"] = true
+			}
+			all = append(all, propsComponent(n, kind, props))
+			children := make([]node, 0, len(spec.Children))
+			for _, child := range spec.Children {
+				children = append(children, create(child))
+			}
+			return branch(n, children...)
+		}
+		actions := id()
+		all = append(all, propsComponent(actions, "row", map[string]any{"visible": true, "equal_height": false}))
+		layout = branch(root, leaf(header), create(*a.Config.Layout), branch(actions, leaf(submit), leaf(clear)))
+		for _, ev := range a.Config.Events {
+			eventInputs := make([]int, 0, len(ev.Inputs))
+			eventOutputs := make([]int, 0, len(ev.Outputs))
+			for _, key := range ev.Inputs {
+				eventInputs = append(eventInputs, refs[key])
+			}
+			for _, key := range ev.Outputs {
+				eventOutputs = append(eventOutputs, refs[key])
+			}
+			deps = append(deps, map[string]any{
+				"id": len(deps), "targets": []any{[]any{targets[ev.Target], ev.Trigger}},
+				"inputs": eventInputs, "outputs": eventOutputs,
+				"backend_fn": true, "queue": false, "api_name": nil, "show_progress": "minimal",
+				"scroll_to_output": false, "batch": false, "cancels": []any{},
+				"types":        map[string]bool{"generator": false, "cancel": false},
+				"trigger_mode": "once", "api_visibility": "private", "connection": "sse",
+				"stream_every": 0.5, "event_specific_args": nil,
+			})
+		}
+	}
 	ids := make([]int, 0, next)
 	for n := 1; n <= next; n++ {
 		ids = append(ids, n)
 	}
-	layout := branch(root, leaf(header), branch(columns, branch(left, leftChildren...), branch(right, rightChildren...)))
 	cfg := map[string]any{
 		"version": "6.30.0", "api_prefix": "/gradio_api", "mode": "interface", "app_id": "goradio",
 		"dev_mode": false, "vibe_mode": false, "analytics_enabled": false, "components": all,
@@ -418,6 +494,23 @@ func gradioComponentProps(c Component, input bool) map[string]any {
 		if c.Value == nil {
 			p["value"] = ""
 		}
+	case "code":
+		p["language"] = "python"
+		if c.Language != "" {
+			p["language"] = c.Language
+		}
+		p["lines"] = 5
+		if c.Lines > 0 {
+			p["lines"] = c.Lines
+		}
+		p["max_lines"] = 25
+		p["wrap_lines"] = true
+		p["show_copy_button"] = true
+		p["show_fullscreen_button"] = true
+		p["show_line_numbers"] = true
+		if c.Value == nil {
+			p["value"] = ""
+		}
 	case "dataframe":
 		p["datatype"] = "auto"
 		if len(c.Datatype) > 0 {
@@ -431,10 +524,35 @@ func gradioComponentProps(c Component, input bool) map[string]any {
 		p["show_row_numbers"] = true
 		p["show_fullscreen_button"] = true
 		p["show_copy_button"] = true
+		if c.ShowCopyButton != nil {
+			p["show_copy_button"] = *c.ShowCopyButton
+		}
 		p["show_search"] = "filter"
-		p["row_count"] = []any{3, "dynamic"}
-		p["col_count"] = []any{3, "dynamic"}
-		p["column_count"] = []any{3, "dynamic"}
+		if c.ShowSearch != nil && !*c.ShowSearch {
+			p["show_search"] = nil
+		}
+		rows := 3
+		if c.RowCount > 0 {
+			rows = c.RowCount
+		}
+		cols := 3
+		if c.ColumnCount > 0 {
+			cols = c.ColumnCount
+		}
+		if len(c.Headers) > 0 {
+			cols = len(c.Headers)
+		}
+		rowMode := "dynamic"
+		colMode := "dynamic"
+		if c.FixedRows {
+			rowMode = "fixed"
+		}
+		if c.FixedColumns {
+			colMode = "fixed"
+		}
+		p["row_count"] = []any{rows, rowMode}
+		p["col_count"] = []any{cols, colMode}
+		p["column_count"] = []any{cols, colMode}
 		if c.Value == nil && len(c.Headers) == 0 {
 			p["value"] = map[string]any{"headers": []any{}, "data": []any{}, "metadata": nil}
 		}
