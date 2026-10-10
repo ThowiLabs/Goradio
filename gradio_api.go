@@ -392,7 +392,46 @@ func (a *App) gradioCall(w http.ResponseWriter, r *http.Request) {
 			runErr = a.storeInput(ctx, idUser, idx, data[0])
 			results = []any{}
 		} else {
-			if _, _, custom := a.customEventForIndex(fnIndex); custom {
+			if spec, stream, streaming := a.customStreamForIndex(fnIndex); streaming {
+				if stream == nil {
+					runErr = failPrediction(503, "EVENTO", "Generador de evento no vinculado")
+				} else {
+					var normalized []any
+					normalized, runErr = a.normalizeCustomEventInputs(fnIndex, data)
+					if runErr == nil {
+						last := []any(nil)
+						runErr = stream(ctx, normalized, func(snapshot []any) error {
+							if err := ctx.Err(); err != nil {
+								return err
+							}
+							prepared, err := a.prepareCustomEventOutputs(ctx, spec, snapshot)
+							if err != nil {
+								return err
+							}
+							last = prepared
+							// Bounded queue: keep final state even if partial frames
+							// must be discarded for a slow/disconnected browser.
+							select {
+							case job.progress <- prepared:
+							default:
+								select {
+								case <-job.progress:
+								default:
+								}
+								select {
+								case job.progress <- prepared:
+								default:
+								}
+							}
+							return nil
+						})
+						if runErr == nil && last == nil {
+							runErr = failPrediction(500, "EVENTO", "El generador no produjo resultados")
+						}
+						results = last
+					}
+				}
+			} else if _, _, custom := a.customEventForIndex(fnIndex); custom {
 				results, runErr = a.executeCustomEvent(ctx, fnIndex, data)
 			} else if a.Stream != nil {
 				normalized := make([]any, len(data))

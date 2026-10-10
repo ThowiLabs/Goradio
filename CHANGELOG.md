@@ -1,5 +1,12 @@
 # Cambios
 
+## Próxima versión (en desarrollo)
+- Eventos de `Blocks` con generadores independientes en Go (`OnStream`) y Python (`Blocks.on`), conectados a la cola SSE v3 original de Gradio.
+- Los callbacks progresivos actualizan únicamente los outputs declarados; pueden coexistir con botones inmediatos y disponen de cancelación por sesión.
+- `Radio` y `CheckboxGroup` nativos, con validación de opciones, listas y duplicados en Go y helpers Python.
+- Pruebas con `go test -race`, suite Python y Chrome de ambos tipos de eventos y componentes; sin rediseñar el frontend.
+
+
 ## 0.4.0 — 2026-10-09
 - Dashboard multipágina Go y Python con sidebar responsive estilo SB Admin, grupos e indicador de página activa.
 - Ventanas con componentes, handler y estado persistente independientes.

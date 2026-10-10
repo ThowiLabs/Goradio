@@ -341,9 +341,9 @@ func (a *App) gradioConfig() map[string]any {
 			deps = append(deps, map[string]any{
 				"id": len(deps), "targets": []any{[]any{targets[ev.Target], ev.Trigger}},
 				"inputs": eventInputs, "outputs": eventOutputs,
-				"backend_fn": true, "queue": false, "api_name": nil, "show_progress": "minimal",
+				"backend_fn": true, "queue": ev.Streaming, "api_name": nil, "show_progress": "minimal",
 				"scroll_to_output": false, "batch": false, "cancels": []any{},
-				"types":        map[string]bool{"generator": false, "cancel": false},
+				"types":        map[string]bool{"generator": ev.Streaming, "cancel": false},
 				"trigger_mode": "once", "api_visibility": "private", "connection": "sse",
 				"stream_every": 0.5, "event_specific_args": nil,
 			})
@@ -357,7 +357,7 @@ func (a *App) gradioConfig() map[string]any {
 		"version": "6.30.0", "api_prefix": "/gradio_api", "mode": "interface", "app_id": "goradio",
 		"dev_mode": false, "vibe_mode": false, "analytics_enabled": false, "components": all,
 		"css": nil, "connect_heartbeat": false, "js": nil, "head": nil, "title": a.Config.Title,
-		"space_id": nil, "enable_queue": a.Stream != nil, "show_error": true, "footer_links": []any{},
+		"space_id": nil, "enable_queue": a.Stream != nil || a.hasStreamingEvents(), "show_error": true, "footer_links": []any{},
 		"run_history": false, "is_colab": false, "max_file_size": a.MaxUploadBytes,
 		"stylesheets": []any{}, "theme": "default", "protocol": "sse_v3",
 		"body_css":    map[string]string{"body_background_fill": "white", "body_text_color": "#1f2937", "body_background_fill_dark": "#0b0f19", "body_text_color_dark": "#f3f4f6"},
@@ -444,6 +444,19 @@ func gradioComponentProps(c Component, input bool) map[string]any {
 		p["allow_custom_value"] = false
 		p["multiselect"] = false
 		p["filterable"] = true
+	case "radio", "checkboxgroup":
+		options := make([]any, 0, len(c.Choices))
+		for _, choice := range c.Choices {
+			options = append(options, []string{choice, choice})
+		}
+		p["choices"] = options
+		p["type"] = "value"
+		if c.Type == "checkboxgroup" {
+			if c.Value == nil {
+				p["value"] = []any{}
+			}
+			p["show_select_all_checkbox"] = false
+		}
 	case "image":
 		p["sources"] = []string{"upload", "clipboard"}
 		p["type"] = "filepath"

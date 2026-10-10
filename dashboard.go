@@ -126,6 +126,19 @@ func (d *Dashboard) BindEvent(path string, index int, handler Handler) error {
 	return app.BindEvent(index, handler)
 }
 
+// BindStreamEvent enables a progressive native Gradio callback on one window.
+func (d *Dashboard) BindStreamEvent(path string, index int, stream StreamHandler) error {
+	normalized, err := normalizeWindowPath(path)
+	if err != nil {
+		return err
+	}
+	app := d.apps[normalized]
+	if app == nil {
+		return errors.New("ventana inexistente")
+	}
+	return app.BindStreamEvent(index, stream)
+}
+
 // SetTheme applies the same Gradio theme to every window in a dashboard.
 // Configure it before serving requests; no theme editor is rendered to users.
 func (d *Dashboard) SetTheme(theme Theme) error {

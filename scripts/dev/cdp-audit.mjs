@@ -60,6 +60,13 @@ try {
    const restored=await send("Runtime.evaluate",{expression:"JSON.stringify({value:document.querySelector('textarea')?.value,body:document.body.innerText.slice(0,160)})",returnByValue:true});
    console.log("RESTORED",JSON.stringify(restored));
  }
+ const buttonArg=process.argv.find(arg=>arg.startsWith("--click-button="));
+ if(buttonArg){
+  const label=buttonArg.slice("--click-button=".length);
+  const clicked=await send("Runtime.evaluate",{expression:"(()=>{const label="+JSON.stringify(label)+";const btn=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===label);if(!btn)return {found:false};btn.click();return {found:true,label}})()",returnByValue:true});
+  console.log("BUTTON",JSON.stringify(clicked));
+  await sleep(3900);
+ }
  if (process.argv.includes("--click-blocks")) {
    const clicked=await send("Runtime.evaluate",{expression:"(()=>{const btn=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Resumir');if(!btn)return 'missing Resumir';btn.click();return 'clicked'})()",returnByValue:true});
    console.log("BLOCKS CLICK",JSON.stringify(clicked));

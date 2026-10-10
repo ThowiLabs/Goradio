@@ -40,13 +40,10 @@ func (a *App) customEventInputComponents(spec EventSpec) []Component {
 	return components
 }
 
-func (a *App) executeCustomEvent(ctx context.Context, index int, raw []any) ([]any, error) {
-	spec, fn, ok := a.customEventForIndex(index)
+func (a *App) normalizeCustomEventInputs(index int, raw []any) ([]any, error) {
+	spec, _, ok := a.customEventForIndex(index)
 	if !ok {
 		return nil, failPrediction(404, "EVENTO", "Evento desconocido")
-	}
-	if fn == nil {
-		return nil, failPrediction(503, "EVENTO", "El evento no tiene función vinculada")
 	}
 	inputs := a.customEventInputComponents(spec)
 	if len(raw) != len(inputs) {
@@ -60,10 +57,10 @@ func (a *App) executeCustomEvent(ctx context.Context, index int, raw []any) ([]a
 		}
 		normalized[i] = v
 	}
-	values, err := fn(ctx, normalized)
-	if err != nil {
-		return nil, err
-	}
+	return normalized, nil
+}
+
+func (a *App) prepareCustomEventOutputs(ctx context.Context, spec EventSpec, values []any) ([]any, error) {
 	if len(values) != len(spec.Outputs) {
 		return nil, failPrediction(500, "SALIDAS", "Número incorrecto de salidas del evento")
 	}
@@ -75,13 +72,55 @@ func (a *App) executeCustomEvent(ctx context.Context, index int, raw []any) ([]a
 	for i, key := range spec.Outputs {
 		full[indexFor[key]] = values[i]
 	}
-	transformed, err := a.prepareGradioOutputs(ctx, full)
+	prepared, err := a.prepareGradioOutputs(ctx, full)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]any, len(spec.Outputs))
 	for i, key := range spec.Outputs {
-		result[i] = transformed[indexFor[key]]
+		result[i] = prepared[indexFor[key]]
 	}
 	return result, nil
+}
+
+func (a *App) executeCustomEvent(ctx context.Context, index int, raw []any) ([]any, error) {
+	spec, fn, ok := a.customEventForIndex(index)
+	if !ok {
+		return nil, failPrediction(404, "EVENTO", "Evento desconocido")
+	}
+	if fn == nil {
+		return nil, failPrediction(503, "EVENTO", "El evento no tiene función vinculada")
+	}
+	normalized, err := a.normalizeCustomEventInputs(index, raw)
+	if err != nil {
+		return nil, err
+	}
+	values, err := fn(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return a.prepareCustomEventOutputs(ctx, spec, values)
+}
+
+func (a *App) hasStreamingEvents() bool {
+	for _, ev := range a.Config.Events {
+		if ev.Streaming {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) customStreamForIndex(index int) (EventSpec, StreamHandler, bool) {
+	spec, _, ok := a.customEventForIndex(index)
+	if !ok || !spec.Streaming {
+		return EventSpec{}, nil, false
+	}
+	base := len(a.Config.Events)
+	for i := 0; i < base; i++ {
+		if a.Config.Events[i].Target == spec.Target && a.Config.Events[i].Trigger == spec.Trigger {
+			return spec, a.eventStreams[i], true
+		}
+	}
+	return EventSpec{}, nil, false
 }

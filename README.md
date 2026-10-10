@@ -14,8 +14,8 @@ The project embeds the compiled **Gradio 6.30.0 frontend** and implements a comp
 - **Python integration** — Define interfaces with familiar `Interface(fn, inputs, outputs)` semantics.
 - **Gradio frontend** — Reuses bundled Gradio 6.30.0 UI assets rather than imitating the interface.
 - **Multipage navigation** — Collapsible sidebar inspired by SB Admin, with the original Gradio interface and theme unchanged; independent routes and callbacks, shared login and optional per-page saved state. The sidebar inherits Gradio's theme and light/dark mode; the developer configures its primary and secondary colors in Go or Python, without exposing an editor to visitors.
-- **Interactive components** — Text, numbers, sliders, checkboxes, dropdowns, JSON, images, audio, video, files, Code, editable Dataframe, Plot, Gallery and Chatbot (experimental).
-- **Native Blocks layouts** — Validated Row, Column, Group, Tabs, Tab and Accordion trees with real Gradio Button actions bound to selected inputs and outputs; Go and Python APIs.
+- **Interactive components** — Text, numbers, sliders, checkboxes, radio buttons, checkbox groups, dropdowns, JSON, images, audio, video, files, Code, editable Dataframe, Plot, Gallery and Chatbot (experimental).
+- **Native Blocks layouts** — Validated Row, Column, Group, Tabs, Tab and Accordion trees with real Gradio Button actions bound to selected inputs and outputs, including **independent SSE streaming callbacks**; Go and Python APIs.
 - **Model-ready chat** — Python `ChatInterface(fn=...)` with real Gradio Chatbot, streaming and bounded per-session conversation history; model integration supplied by the developer.
 - **Reactive events and streaming** — Native `input`, `change`, page `load`, periodic Timer, SSE v3 streaming, output-property updates, sequential callbacks and bounded per-session state.
 - **Native public sharing** — Generate `*.gradio.live` links using a Go implementation of the tunnel protocol; no separate `frpc` executable is required.
@@ -150,6 +150,8 @@ For Go configuration, state isolation, routing and authentication, see the [dash
 | Checkbox | `gr.Checkbox()` | Boolean |
 | Dropdown | `gr.Dropdown([...])` | Selected value |
 | JSON | `gr.JSON()` | JSON-compatible value |
+| Radio | `gr.Radio([...])` | One selected option |
+| CheckboxGroup | `gr.CheckboxGroup([...])` | Selected options list |
 | Image | `gr.Image()` | Local uploaded file path |
 | Audio | `gr.Audio()` | Local uploaded file path |
 | Video | `gr.Video()` | Local uploaded file path |

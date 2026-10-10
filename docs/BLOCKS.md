@@ -24,10 +24,11 @@ are checked before serving. Maximum: 128 layout nodes, 12 levels, 64
 additional events. A `Tabs` container contains `Tab` children.
 
 The standard Interface `Submit`/`Clear`, `Load`, `Live`, `Timer`,
-session state, and streaming remain supported. **Targeted `on` callbacks**
-are currently **non-streaming** and receive only the named input values.
-Their results update only the named outputs. Register all Go events before
-starting the server.
+session state, and streaming remain supported. **Targeted callbacks can now be
+ordinary functions or independent generators**; each uses its own named inputs
+and outputs. The frontend uses native `queue/join`, `queue/data` and Gradio
+SSE v3 updates for generators. No replacement HTML or second dashboard is used.
+Register all Go events before starting the server.
 
 ### Go
 
@@ -94,6 +95,82 @@ are real, but the Go backend supports only the declared subset.
 Try `python examples/blocks_demo.py` or include a Blocks instance in an
 existing multipage `Dashboard.route(...)`.
 
+## Independent streaming callbacks in Blocks
+
+A single `Blocks` layout may have multiple buttons: one callback can respond
+immediately, while another yields progress over time. Each callback updates
+**only the outputs named in its event**; other components are left untouched.
+An input is validated before the associated callback executes.
+
+### Go
+
+```go
+err := app.OnStream(goradio.EventSpec{
+    Target: "progress", Trigger: "click",
+    Inputs: []string{"query"}, Outputs: []string{"result"},
+}, func(ctx context.Context, values []any, emit func([]any) error) error {
+    for step := 1; step <= 3; step++ {
+        if err := ctx.Err(); err != nil { return err }
+        if err := emit([]any{fmt.Sprintf("Paso %d/3", step)}); err != nil {
+            return err
+        }
+    }
+    return nil
+})
+```
+
+Use `app.BindStreamEvent(index, handler)` when the `EventSpec` is defined in
+a configuration file. In a multipage dashboard, use
+`dashboard.BindStreamEvent(path, index, handler)`.
+
+### Python
+
+```python
+def progress(text):
+    for step in range(1, 4):
+        yield f"**Paso {step}/3:** {text}"
+
+def immediate(text):
+    return text.upper()
+
+demo.on("progress", "click", progress,
+        inputs=["query"], outputs=["progress_text"])
+demo.on("instant", "click", immediate,
+        inputs=["query"], outputs=["instant_text"])
+```
+
+Python `Blocks.on` automatically identifies a generator by
+`inspect.isgeneratorfunction`. This is a **subset** of the original Blocks
+event system: generator callbacks emit complete snapshots for their selected
+outputs; they do not yet support arbitrary dynamic event graphs, token-only
+delta semantics, or all upstream concurrency/cancel policies.
+
+To run the complete example and browser regression:
+
+```powershell
+go build -o bin/goradio-blocks-cli.exe ./cmd/goradio
+python scripts/dev/blocks_stream_browser_smoke.py
+```
+
+## Native Radio and CheckboxGroup inputs
+
+The original Gradio `Radio` and `CheckboxGroup` components are supported
+in Go and Python. They are not HTML substitutes. Selection values are checked
+against the server-declared choices: unknown options, duplicate selections and
+missing required selections are rejected.
+
+```python
+color = gr.Radio(["Rojo", "Azul", "Verde"], value="Azul", label="Color")
+languages = gr.CheckboxGroup(["Go", "Python", "Rust"], value=["Go"])
+```
+
+In Go, use `Component{Type:"radio", Choices:[]string{...}}` and
+`Component{Type:"checkboxgroup", Choices:[]string{...}}`. The latter
+returns a list of selected strings to the callback.
+
+Run `python scripts/dev/selection_browser_smoke.py` after building
+`bin/goradio-blocks-cli.exe` to verify the native controls in Chrome.
+
 ## Native editable Dataframe and Code
 
 `gr.Dataframe(...)` supports headers, datatypes, row and column counts,
@@ -156,6 +233,8 @@ go test -race -count=1 ./...
 go vet ./...
 python -m unittest discover -s python/tests -v
 python scripts/dev/blocks_python_browser_smoke.py
+python scripts/dev/blocks_stream_browser_smoke.py
+python scripts/dev/selection_browser_smoke.py
 python scripts/dev/chat_interface_browser_smoke.py
 ```
 
@@ -166,7 +245,7 @@ and no browser console/network errors.
 ## Still outstanding
 
 Goradio does not yet implement all upstream Blocks features: arbitrary
-nested dependency graphs, multiple independent streaming functions, every
+nested dependency graphs, every
 event type and cancellation policy, user-defined UI render functions,
 component-specific select/edit event payloads, dynamic component insertion,
 all multimedia editors, Model3D, FileExplorer, full queue concurrency control,

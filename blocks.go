@@ -139,10 +139,11 @@ func Button(key, label string) LayoutNode { return LayoutNode{Type: "button", Ke
 
 // EventSpec binds one native Gradio UI event to a selection of input and output keys.
 type EventSpec struct {
-	Target  string   `json:"target"`
-	Trigger string   `json:"trigger"`
-	Inputs  []string `json:"inputs"`
-	Outputs []string `json:"outputs"`
+	Target    string   `json:"target"`
+	Trigger   string   `json:"trigger"`
+	Inputs    []string `json:"inputs"`
+	Outputs   []string `json:"outputs"`
+	Streaming bool     `json:"streaming,omitempty"`
 }
 
 func validateEventSpec(ev EventSpec, cfg Config, buttons map[string]bool) error {

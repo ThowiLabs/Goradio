@@ -16,7 +16,7 @@ import (
 var gradioSessionHash = regexp.MustCompile(`^[a-zA-Z0-9_-]{8,128}$`)
 
 func (a *App) gradioQueueJoin(w http.ResponseWriter, r *http.Request) {
-	if a.Stream == nil {
+	if a.Stream == nil && !a.hasStreamingEvents() {
 		http.Error(w, "No streaming handler", http.StatusNotFound)
 		return
 	}

@@ -77,6 +77,7 @@ type App struct {
 	Validator      func(context.Context, []any) error
 	pipeline       []Handler
 	eventHandlers  map[int]Handler
+	eventStreams   map[int]StreamHandler
 	MediaDir       string
 	MaxUploadBytes int64
 	tunnels        *TunnelManager
@@ -90,7 +91,7 @@ type App struct {
 	sessions       map[string]*sessionBucket
 }
 
-var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "image": true, "audio": true, "video": true, "file": true, "json": true, "markdown": true, "code": true, "dataframe": true, "chatbot": true, "plot": true, "gallery": true}
+var supported = map[string]bool{"textbox": true, "number": true, "slider": true, "checkbox": true, "dropdown": true, "radio": true, "checkboxgroup": true, "image": true, "audio": true, "video": true, "file": true, "json": true, "markdown": true, "code": true, "dataframe": true, "chatbot": true, "plot": true, "gallery": true}
 var fileID = regexp.MustCompile(`^[a-f0-9]{32}(\.[a-z0-9]{1,10})?$`)
 
 func New(config Config, handler Handler, mediaDir string) (*App, error) {
@@ -146,7 +147,7 @@ func New(config Config, handler Handler, mediaDir string) (*App, error) {
 	if config.Title == "" {
 		config.Title = "Goradio"
 	}
-	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager(), jobs: map[string]*gradioJob{}, uploads: map[string]*uploadState{}, sessions: map[string]*sessionBucket{}, eventHandlers: map[int]Handler{}}, nil
+	return &App{Config: config, Handler: handler, MediaDir: mediaDir, MaxUploadBytes: 40 << 20, tunnels: NewTunnelManager(), jobs: map[string]*gradioJob{}, uploads: map[string]*uploadState{}, sessions: map[string]*sessionBucket{}, eventHandlers: map[int]Handler{}, eventStreams: map[int]StreamHandler{}}, nil
 }
 
 // BindEvent attaches a callback to an event already declared in Config.Events.
@@ -186,6 +187,32 @@ func (a *App) On(spec EventSpec, handler Handler) error {
 	a.Config.Events = copyCfg.Events
 	a.eventHandlers[len(a.Config.Events)-1] = handler
 	return nil
+}
+
+// BindStreamEvent links a declared Blocks event to a generator. When an
+// event is streaming, the original Gradio frontend uses its native SSE queue.
+func (a *App) BindStreamEvent(index int, stream StreamHandler) error {
+	if stream == nil || a.Config.Layout == nil || index < 0 || index >= len(a.Config.Events) {
+		return errors.New("evento de streaming inválido")
+	}
+	a.eventStreams[index] = stream
+	a.Config.Events[index].Streaming = true
+	return nil
+}
+
+// OnStream declares an independent streaming event on a native Gradio Button
+// or component. It does not replace the original frontend or theme.
+func (a *App) OnStream(spec EventSpec, stream StreamHandler) error {
+	if stream == nil {
+		return errors.New("stream obligatorio")
+	}
+	spec.Streaming = true
+	if err := a.On(spec, func(context.Context, []any) ([]any, error) {
+		return nil, failPrediction(400, "EVENTO", "Este evento requiere SSE")
+	}); err != nil {
+		return err
+	}
+	return a.BindStreamEvent(len(a.Config.Events)-1, stream)
 }
 
 // SetStreamHandler enables progressive results over Gradio's SSE protocol.
@@ -528,7 +555,7 @@ func (a *App) validate(c Component, v any) (any, error) {
 		if c.Required && !b {
 			return nil, errors.New("casilla obligatoria")
 		}
-	case "dropdown":
+	case "dropdown", "radio":
 		s, ok := v.(string)
 		if !ok {
 			return nil, errors.New("debe ser texto")
@@ -542,6 +569,30 @@ func (a *App) validate(c Component, v any) (any, error) {
 		if !found {
 			return nil, errors.New("opción no permitida")
 		}
+	case "checkboxgroup":
+		items, ok := v.([]any)
+		if !ok {
+			return nil, errors.New("selección múltiple debe ser lista")
+		}
+		if len(items) > len(c.Choices) {
+			return nil, errors.New("selección múltiple demasiado grande")
+		}
+		allowed := make(map[string]bool, len(c.Choices))
+		for _, choice := range c.Choices {
+			allowed[choice] = true
+		}
+		seen := make(map[string]bool, len(items))
+		for _, item := range items {
+			value, ok := item.(string)
+			if !ok || !allowed[value] || seen[value] {
+				return nil, errors.New("opción de selección múltiple no permitida o duplicada")
+			}
+			seen[value] = true
+		}
+		if c.Required && len(items) == 0 {
+			return nil, errors.New("selección obligatoria")
+		}
+		return v, nil
 	case "image", "audio", "video", "file":
 		s, ok := v.(string)
 		if !ok {

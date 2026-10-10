@@ -121,7 +121,12 @@ func main() {
 						slug = "home"
 					}
 					url := strings.TrimSuffix(*callback, "/") + "/" + slug + "/event/" + fmt.Sprint(i)
-					if err := dashboard.BindEvent(page.Path, i, goradio.PythonHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN"))); err != nil {
+					if page.Events[i].Streaming {
+						err = dashboard.BindStreamEvent(page.Path, i, goradio.PythonStreamHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN")))
+					} else {
+						err = dashboard.BindEvent(page.Path, i, goradio.PythonHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN")))
+					}
+					if err != nil {
 						log.Fatal(err)
 					}
 				}
@@ -139,7 +144,12 @@ func main() {
 		if *callback != "" {
 			for i := range cfg.Events {
 				url := strings.TrimSuffix(*callback, "/") + "/event/" + fmt.Sprint(i)
-				if err := single.BindEvent(i, goradio.PythonHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN"))); err != nil {
+				if cfg.Events[i].Streaming {
+					err = single.BindStreamEvent(i, goradio.PythonStreamHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN")))
+				} else {
+					err = single.BindEvent(i, goradio.PythonHandler(url, os.Getenv("GORADIO_CALLBACK_TOKEN")))
+				}
+				if err != nil {
 					log.Fatal(err)
 				}
 			}

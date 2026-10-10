@@ -25,7 +25,7 @@ from urllib.request import Request, urlopen
 
 __all__ = [
     "Interface", "Dashboard", "Blocks", "ChatInterface", "Layout", "Button", "Row", "Column", "Group", "Tabs", "Tab", "Accordion", "Ref", "Component", "Textbox", "Number", "Slider", "Checkbox",
-    "Dropdown", "Image", "Audio", "Video", "File", "JSON", "Theme", "Markdown", "Code", "Dataframe", "Chatbot", "Plot", "Gallery", "update", "state_get", "state_set", "media",
+    "Dropdown", "Radio", "CheckboxGroup", "Image", "Audio", "Video", "File", "JSON", "Theme", "Markdown", "Code", "Dataframe", "Chatbot", "Plot", "Gallery", "update", "state_get", "state_set", "media",
 ]
 
 _ACTIVE_SESSION: contextvars.ContextVar = contextvars.ContextVar("goradio_active_session", default=None)
@@ -76,7 +76,7 @@ def state_set(key: str, value: Any) -> None:
 
 
 _MEDIA_ROOT: Path | None = None
-_TYPES = {"textbox", "number", "slider", "checkbox", "dropdown",
+_TYPES = {"textbox", "number", "slider", "checkbox", "dropdown", "radio", "checkboxgroup",
           "image", "audio", "video", "file", "json", "markdown", "code", "dataframe", "chatbot", "plot", "gallery"}
 
 
@@ -248,6 +248,10 @@ def Slider(label="Control", minimum=0, maximum=100, step=1, value=None, **kwargs
 def Checkbox(label="Selección", **kwargs): return Component("checkbox", label, **kwargs)
 def Dropdown(choices, label="Opciones", **kwargs):
     return Component("dropdown", label, choices=list(choices), **kwargs)
+def Radio(choices, label="Opciones", **kwargs):
+    return Component("radio",label,choices=list(choices),**kwargs)
+def CheckboxGroup(choices, label="Selección múltiple", **kwargs):
+    return Component("checkboxgroup",label,choices=list(choices),**kwargs)
 def Image(label="Imagen", **kwargs): return Component("image", label, **kwargs)
 def Audio(label="Audio", **kwargs): return Component("audio", label, **kwargs)
 def Video(label="Video", **kwargs): return Component("video", label, **kwargs)
@@ -470,8 +474,10 @@ class Interface:
                     output_count = len(target.outputs)
                     input_count = len(target.inputs)
                     if event_index is not None:
-                        if streaming or event_index >= len(target._events):
-                            raise ValueError("Evento desconocido o sin streaming")
+                        if event_index >= len(target._events):
+                            raise ValueError("Evento desconocido")
+                        if streaming != inspect.isgeneratorfunction(target._events[event_index][1]):
+                            raise ValueError("Modo de evento incompatible")
                         spec, event_fn = target._events[event_index]
                         input_count = len(spec["inputs"])
                         output_count = len(spec["outputs"])
@@ -501,7 +507,7 @@ class Interface:
                     target.validator(*data)
                 fn = event_fn if event_fn is not None else target.fn
                 if streaming:
-                    if not target.streaming:
+                    if not inspect.isgeneratorfunction(fn):
                         raise ValueError("Función no es generadora")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -677,8 +683,8 @@ class Blocks(Interface):
     def on(self, target: str, trigger: str, fn: Callable,
            inputs: list[str], outputs: list[str]) -> "Blocks":
         """Bind click/change/input/submit/select to named components."""
-        if not callable(fn) or inspect.isgeneratorfunction(fn):
-            raise TypeError("on requiere una función normal (no generadora)")
+        if not callable(fn):
+            raise TypeError("on requiere una función")
         if len(self._events) >= 64:
             raise ValueError("Máximo 64 eventos")
         keys_in = {c.key for c in self.inputs}
@@ -704,7 +710,8 @@ class Blocks(Interface):
                for spec, _ in self._events):
             raise ValueError("Evento duplicado")
         spec = {"target": target, "trigger": trigger,
-                "inputs": list(inputs), "outputs": list(outputs)}
+                "inputs": list(inputs), "outputs": list(outputs),
+                "streaming": inspect.isgeneratorfunction(fn)}
         self._events.append((spec, fn))
         return self
 
